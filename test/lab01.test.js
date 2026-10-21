@@ -5,11 +5,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createAccumulator } from "../src/loop.js";
-import { createShip, integrate } from "../src/sim/ship.js";
+import { integrate } from "../src/sim/ship.js";
+import { Vector2 } from "../src/sim/vector.js";
 import { createArena, wrapPosition, wrappedDelta } from "../src/sim/arena.js";
 import { lerpAngle, wrapAngle } from "../src/sim/math.js";
 
 const STEP = 1 / 60;
+
+/** Lab 1's ship state as plain data (Lab 2 moved it onto Vector2 fields). */
+const createShip = () => ({
+  pos: new Vector2(800, 450),
+  vel: new Vector2(),
+  angle: -Math.PI / 2,
+  thrust: false,
+});
 const THRUST = { thrust: true, left: false, right: false };
 const THRUST_LEFT = { thrust: true, left: true, right: false };
 
@@ -22,7 +31,7 @@ function runWithFrames(frameDeltas, controlsForStep) {
   for (const delta of frameDeltas) {
     acc.advance(delta, (dt) => {
       integrate(ship, controlsForStep(step++), dt);
-      wrapPosition(arena, ship);
+      wrapPosition(arena, ship.pos);
     });
   }
   return { ship, steps: step };
@@ -60,8 +69,8 @@ test("fixed step: 60 Hz, 144 Hz and a jittery 30 Hz display produce the SAME tra
       acc.advance(d, (dt) => {
         if (step >= 300) return;
         integrate(ship, controls(step++), dt);
-        wrapPosition(arena, ship);
-        if (step === 300) snapshot = { ...ship };
+        wrapPosition(arena, ship.pos);
+        if (step === 300) snapshot = structuredClone(ship);
       });
     }
     return snapshot;
@@ -106,7 +115,7 @@ test("variable timestep (the anti-pattern) diverges between frame rates", () => 
       integrate(ship, THRUST, dt);
       t += dt;
     }
-    return ship.y;
+    return ship.pos.y;
   };
   assert.notEqual(run(60), run(10)); // same 5 s of input, different result
 });
@@ -132,5 +141,5 @@ test("arena wraps positions and wrappedDelta picks the short way", () => {
 test("integrate respects max speed", () => {
   const ship = createShip();
   for (let i = 0; i < 1000; i++) integrate(ship, THRUST, STEP);
-  assert.ok(Math.hypot(ship.vx, ship.vy) <= 460 + 1e-9);
+  assert.ok(ship.vel.length() <= 460 + 1e-9);
 });

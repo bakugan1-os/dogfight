@@ -1,6 +1,8 @@
 // Drawing only. Reads state, never changes it.
 
 import { SHIP_PARAMS } from "../sim/ship.js";
+import { wrapCoord, wrappedDelta } from "../sim/arena.js";
+import { lerpAngle } from "../sim/math.js";
 
 /** Deterministic star positions (tiny LCG), generated once — the background must not flicker. */
 export function createStarfield(arena, count = 160, seed = 12345) {
@@ -116,4 +118,138 @@ export function drawHud(ctx, lines) {
     ctx.fillText(text, 18, 16 + i * 18);
   });
   ctx.restore();
+}
+
+/** Position and heading of an entity between its previous and current step. */
+export function interpolate(entity, alpha, arena) {
+  const { prevPos, pos } = entity;
+  return {
+    x: wrapCoord(prevPos.x + wrappedDelta(prevPos.x, pos.x, arena.width) * alpha, arena.width),
+    y: wrapCoord(prevPos.y + wrappedDelta(prevPos.y, pos.y, arena.height) * alpha, arena.height),
+    angle: lerpAngle(entity.prevAngle, entity.angle, alpha),
+  };
+}
+
+function drawShipEntity(ctx, ship, x, y, angle, time) {
+  // Blink while invulnerable after (re)spawn.
+  if (ship.invulnerable > 0 && Math.floor(time * 10) % 2 === 0) ctx.globalAlpha = 0.35;
+  drawShip(ctx, x, y, angle, ship.thrust, time, ship.color);
+  ctx.globalAlpha = 1;
+
+  if (ship.effects.has("shield")) {
+    ctx.strokeStyle = "rgba(111, 183, 255, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, ship.radius + 9 + Math.sin(time * 6) * 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // HP bar above the ship
+  const w = 34;
+  const frac = ship.hp / ship.maxHp;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(x - w / 2, y - ship.radius - 16, w, 4);
+  ctx.fillStyle = frac > 0.5 ? "#7cf3a0" : frac > 0.25 ? "#ffd166" : "#ff5d5d";
+  ctx.fillRect(x - w / 2, y - ship.radius - 16, w * frac, 4);
+  ctx.fillStyle = ship.color;
+  ctx.font = "bold 11px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(`P${ship.playerId}`, x, y - ship.radius - 20);
+  ctx.textAlign = "start";
+}
+
+function drawBullet(ctx, bullet, x, y, angle) {
+  const homing = bullet.behaviors.some((b) => b.name === "homing");
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = homing ? "#ff7ad9" : "#fff3b0";
+  ctx.fillRect(-7, -1.5, 14, 3);
+  ctx.restore();
+}
+
+function drawAsteroid(ctx, asteroid, x, y, angle) {
+  const { radius, shape } = asteroid;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  shape.forEach((k, i) => {
+    const a = (i / shape.length) * Math.PI * 2;
+    const px = Math.cos(a) * radius * k;
+    const py = Math.sin(a) * radius * k;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.fillStyle = asteroid.seeker ? "#3a1c22" : "#2a2620";
+  ctx.strokeStyle = asteroid.seeker ? "#ff8a8a" : "#c9b38f";
+  ctx.lineWidth = 2;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPickup(ctx, pickup, x, y, angle, time) {
+  const { color, label } = pickup.spec;
+  const pulse = 1 + Math.sin(time * 5) * 0.08;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.save();
+  ctx.rotate(angle);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(
+    -pickup.radius * pulse,
+    -pickup.radius * pulse,
+    2 * pickup.radius * pulse,
+    2 * pickup.radius * pulse,
+  );
+  ctx.restore();
+  ctx.fillStyle = color;
+  ctx.font = "bold 14px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, 0, 1);
+  ctx.restore();
+}
+
+function drawExplosion(ctx, explosion, alpha, step) {
+  const life = 1 - explosion.age / explosion.duration;
+  ctx.globalAlpha = Math.max(0, life);
+  ctx.fillStyle = explosion.color;
+  // Particles have no "previous" copy: step them back by (1 - alpha) of a step instead.
+  const back = (alpha - 1) * step;
+  for (const p of explosion.particles) {
+    ctx.fillRect(p.x + p.vx * back - 1.5, p.y + p.vy * back - 1.5, 3, 3);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * Draws every entity. Dispatch on `kind` (data) instead of a draw() method on each class:
+ * the simulation classes stay free of canvas code and can run on the server in Lab 4–5.
+ */
+export function drawWorld(ctx, world, alpha, time, step) {
+  const { arena } = world;
+  for (const e of world) {
+    if (e.kind === "explosion") {
+      drawExplosion(ctx, e, alpha, step);
+      continue;
+    }
+    const { x, y, angle } = interpolate(e, alpha, arena);
+    const margin = e.kind === "ship" ? e.radius * 3 : e.radius * 1.3;
+    drawWrapped(arena, x, y, margin, (dx, dy) => {
+      switch (e.kind) {
+        case "ship":
+          return drawShipEntity(ctx, e, dx, dy, angle, time);
+        case "bullet":
+          return drawBullet(ctx, e, dx, dy, angle);
+        case "asteroid":
+          return drawAsteroid(ctx, e, dx, dy, angle);
+        case "pickup":
+          return drawPickup(ctx, e, dx, dy, angle, time);
+      }
+    });
+  }
 }

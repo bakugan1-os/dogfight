@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dogfight</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <canvas id="game" tabindex="-1" aria-label="Ігрове поле"></canvas>
+
+    <div id="loading-actions" class="actions overlay-actions" hidden>
+      <button type="button" data-action="cancel">Скасувати (Esc)</button>
+      <button type="button" data-action="defaults">Грати зі стандартною ареною</button>
+      <button type="button" data-action="retry">Спробувати ще раз</button>
+      <button type="button" data-action="start" class="primary">Почати</button>
+    </div>
+
+    <section id="lobby" class="panel" aria-label="Лобі" hidden></section>
+    <section id="room" class="panel" aria-label="Кімната" hidden></section>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

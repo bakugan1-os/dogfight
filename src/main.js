@@ -287,7 +287,9 @@ function render(alpha, stats) {
 
   if (screen === "loading") {
     const end = loading.finished || performance.now();
-    drawLoading(ctx, view, { ...loading, elapsed: end - loading.started }, time);
+    const bottom = drawLoading(ctx, view, { ...loading, elapsed: end - loading.started }, time);
+    const top = `${Math.round(bottom)}px`;
+    if (actionsEl.style.top !== top) actionsEl.style.top = top; // buttons sit right under the text
     return;
   }
   if (screen === "lobby") {

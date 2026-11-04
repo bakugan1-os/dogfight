@@ -16,6 +16,7 @@ const STATUS_STYLE = {
  * @param {"loading"|"done"|"error"|"aborted"} state.phase
  * @param {string} state.headline
  * @param {number} state.elapsed            ms since loading started
+ * @returns {number} y just below the text, in CSS pixels
  */
 export function drawLoading(ctx, view, state, time) {
   const { width, height } = view;
@@ -77,7 +78,7 @@ export function drawLoading(ctx, view, state, time) {
   ctx.font = "15px system-ui, sans-serif";
   ctx.fillStyle =
     { error: "#ff8f8f", aborted: "#c7d3f2", done: "#7cf3a0" }[state.phase] ?? "#9fb0d8";
-  wrapText(ctx, state.headline, x, y, w, 20);
+  return wrapText(ctx, state.headline, x, y, w, 20) + 16; // where the DOM buttons should go
 }
 
 function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
@@ -93,4 +94,5 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
     }
   }
   ctx.fillText(line, x, y);
+  return y + lineHeight;
 }

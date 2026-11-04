@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dogfight: головоломки порядку</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --line: #23304d;
+        --muted: #8b9bc2;
+        --ok: #7cf3a0;
+        --bad: #ff8f8f;
+      }
+      body {
+        margin: 0;
+        padding: 24px 16px;
+        background: #05070d;
+        color: #dbe5ff;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 4px;
+      }
+      p.lead {
+        color: var(--muted);
+        margin: 0 0 20px;
+      }
+      article {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin: 0 0 14px;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+      pre {
+        margin: 0 0 10px;
+        padding: 10px;
+        background: #0a0f1c;
+        border-radius: 6px;
+        overflow-x: auto;
+        font:
+          13px/1.45 ui-monospace,
+          Consolas,
+          monospace;
+      }
+      .row {
+        font:
+          13px ui-monospace,
+          Consolas,
+          monospace;
+        margin: 2px 0;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .bad {
+        color: var(--bad);
+      }
+      .why {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 8px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>П'ять головоломок порядку виконання</h1>
+      <p class="lead">
+        Кожна запускається тут, у браузері. «Фактично» — реальний вивід цієї сторінки.
+      </p>
+      <div id="out"></div>
+    </main>
+    <script type="module">
+      import { PUZZLES, runPuzzle } from "./src/puzzles/puzzles.js";
+      const out = document.getElementById("out");
+      const el = (tag, cls, text) =>
+        Object.assign(document.createElement(tag), { className: cls, textContent: text });
+      const results = [];
+      for (const p of PUZZLES) {
+        const actual = await runPuzzle(p);
+        const same = actual.join(" ") === p.expected.join(" ");
+        results.push({ id: p.id, actual, same });
+        const card = el("article", "");
+        card.append(
+          el("h2", "", `${p.id}. ${p.title}`),
+          el("pre", "", p.code),
+          el("div", "row", `Очікую:   ${p.expected.join(", ")}`),
+          el(
+            "div",
+            `row ${same ? "ok" : "bad"}`,
+            `Фактично: ${actual.join(", ")} ${same ? "✓" : "✗"}`,
+          ),
+          el("p", "why", p.why),
+        );
+        out.append(card);
+      }
+      console.log("[puzzles]", JSON.stringify(results));
+    </script>
+  </body>
+</html>

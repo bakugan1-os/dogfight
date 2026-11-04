@@ -298,6 +298,34 @@ test("ws: an answering client survives many heartbeats", async (t) => {
   c.ws.close();
 });
 
+test("ws: slow-client policy — chat is dropped over the soft limit, the socket cut over the hard one", async (t) => {
+  const { game, ws } = await startServer({
+    SLOW_CLIENT_BYTES: "10000",
+    DROP_CLIENT_BYTES: "50000",
+  });
+  t.after(() => game.stop());
+  const slow = await joined(ws, "r-104", "Slow");
+  await slow.next("roster");
+  const [serverSide] = game.sockets.wss.clients; // the server's end of Slow's connection
+  let queued = 20_000; // pretend 20 KB are stuck in its send buffer: the client stopped reading
+  Object.defineProperty(serverSide, "bufferedAmount", { get: () => queued });
+
+  const fast = await joined(ws, "r-104", "Fast");
+  const roster = await slow.next("roster"); // critical messages still go through
+  assert.deepEqual(
+    roster.players.map((p) => p.name),
+    ["Slow", "Fast"],
+  );
+  fast.send({ type: "chat", text: "you will not see this" });
+  await fast.next("chat");
+  assert.equal(game.sockets.counters.slowDrops >= 1, true, "chat to Slow was dropped");
+
+  queued = 100_000; // now beyond DROP_CLIENT_BYTES
+  fast.send({ type: "chat", text: "and now you are gone" });
+  assert.equal((await slow.closed).code, 1006, "terminated, no close handshake");
+  fast.ws.close();
+});
+
 // ---- match logs & replays -------------------------------------------------------------------
 
 test("NdjsonEncoder: objects in, one JSON line each out", async () => {

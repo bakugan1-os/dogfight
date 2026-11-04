@@ -1,0 +1,16 @@
+{
+  "name": "@dogfight/client",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "The browser game: canvas, loop, simulation, lobby (Vite app from Labs 1-3).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}

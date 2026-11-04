@@ -2,10 +2,10 @@ import js from "@eslint/js";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist/", "node_modules/"] },
+  { ignores: ["**/dist/", "**/node_modules/", "server/logs/"] },
   js.configs.recommended,
   {
-    files: ["src/**/*.js"],
+    files: ["client/src/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
@@ -13,13 +13,19 @@ export default [
     },
   },
   {
-    // The simulation must stay DOM-free: no browser globals are allowed in src/sim —
+    // The simulation must stay DOM-free: no browser globals are allowed in client/src/sim —
     // except EventTarget/CustomEvent, which are platform-neutral (Node 22 has them too).
-    files: ["src/sim/**/*.js"],
+    files: ["client/src/sim/**/*.js"],
     languageOptions: { globals: { EventTarget: "readonly", CustomEvent: "readonly" } },
   },
   {
-    files: ["test/**/*.js", "scripts/**/*.js", "*.config.js"],
+    files: [
+      "server/**/*.js",
+      "scripts/**/*.js",
+      "client/test/**/*.js",
+      "client/scripts/**/*.js",
+      "**/*.config.js",
+    ],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

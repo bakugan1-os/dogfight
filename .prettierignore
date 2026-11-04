@@ -1,4 +1,5 @@
 dist/
 node_modules/
 package-lock.json
-public/assets/arenas.broken.json
+client/public/assets/arenas.broken.json
+server/logs/

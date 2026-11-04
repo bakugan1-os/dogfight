@@ -4,3 +4,5 @@ dist/
 *.log
 .vscode/*
 !.vscode/extensions.json
+server/logs/
+server/.env

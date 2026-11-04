@@ -9,18 +9,24 @@
 | 1    | `lab-01` | Ігровий цикл з фіксованим кроком, корабель під керуванням з клавіатури, HUD, 3 експерименти                                                              |
 | 2    | `lab-02` | Модель сутностей (`class` + один `extends`), світ на `Map`, кулі, астероїди, колізії, урон, респаун, рахунок, самонавідні кулі й бонуси через композицію |
 | 3    | `lab-03` | Конвеєр асетів з екраном завантаження (паралельно, з прогресом, retry і скасуванням), спрайти, звук через Web Audio, шина подій, лобі через HTTP         |
+| 4    | `lab-04` | Сервер на Node: `node:http` (клієнт, API, `/health`), кімнати на `EventEmitter`, WebSocket-чат з валідацією й heartbeat, логи матчів стрімами, ліміти    |
 
 ## Запуск
 
 ```bash
 nvm use            # Node 22 з .nvmrc (на Windows: nvm-windows або fnm)
-npm install
-npm run dev        # http://localhost:5173
-npm test           # тести (node:test, без браузера)
-npm run lint       # ESLint (flat config)
+npm install        # ставить обидва пакети: client/ і server/ (npm workspaces)
+npm run dev        # сервер (http://localhost:8787) + Vite (http://localhost:5173) — відкривати 5173
+npm test           # тести клієнта і сервера (node:test)
+npm run lint       # ESLint (flat config) по всьому репозиторію
 npm run format     # Prettier
-npm run build      # продакшн-збірка у dist/
+npm run build      # збірка клієнта у client/dist/
+npm start          # продакшн: Node сам віддає client/dist + API + WebSocket на http://localhost:8787
 ```
+
+У розробці Vite віддає клієнт і проксує `/api`, `/health` і `/ws` на Node-сервер, тож сторінка і сервер
+мають один origin, як і в продакшні. Налаштування сервера — змінні оточення (`server/.env.example`, перевіряє
+`server/src/config.js`).
 
 Керування (два гравці за однією клавіатурою):
 
@@ -30,64 +36,51 @@ npm run build      # продакшн-збірка у dist/
 | Поворот | A / D          | ← / →             |
 | Вогонь  | Space          | Enter             |
 
-**P** — пауза, **R** — рестарт, **M** — звук, **Esc** — назад у лобі, **H** — сховати довідку. Параметри URL:
-`?players=1` (гра вдвох вимкнена), `?seed=42` (інше зерно світу), `?bug=this` (демонстрація бага з `this`),
-`?fail=…` і `?lobby=…` (галерея збоїв Lab 3), а також перемикачі експериментів Lab 1 (повний список —
-у `src/experiments.js`). Головоломки порядку виконання: http://localhost:5173/puzzles.html
+**P** — пауза, **R** — рестарт, **M** — звук, **Esc** — назад (з гри в кімнату, з кімнати в лобі), **H** —
+сховати довідку. Параметри URL: `?players=1`, `?seed=42`, `?bug=this` (Lab 2), `?fail=…` і `?lobby=…`
+(галерея збоїв Lab 3), перемикачі експериментів Lab 1 — повний список у `client/src/experiments.js`.
+Головоломки порядку виконання: http://localhost:5173/puzzles.html
 
 ## Структура
 
 ```
-index.html              <canvas> + кнопки екрана завантаження + контейнер лобі
-puzzles.html            п'ять головоломок порядку виконання, запускаються в браузері   (Lab 3)
-vite.config.js          middleware, що навмисно ламає відповіді: затримка, статус, «flaky» (Lab 3)
-public/
-  assets/manifest.json  список асетів: спрайти, звуки, дані арен                       (Lab 3)
-  assets/sprites/       спрайтшити PNG (згенеровані scripts/make-sprites.js)
-  assets/sfx/           звуки WAV (синтезовані scripts/make-sounds.js)
-  assets/arenas.json    налаштування арен; arenas.broken.json — навмисно битий JSON
-  api/rooms.json        «сервер» лобі (статичний файл; Lab 4 замінить його на Node)
-src/
-  main.js               збирає модулі докупи: завантаження → лобі → гра (логіки гри тут немає)
-  loop.js               createAccumulator() + createLoop({ step, simulate, render }) — rAF і фіксований крок
-  input.js              createInput(target) — замикання над станом клавіш; readControls()
-  experiments.js        перемикачі експериментів через параметри URL; режими збоїв Lab 3
-  net/http.js           fetchOk/fetchJson (перевірка ok), withRetry (backoff + jitter), sleep (Lab 3)
-  net/faults.js         схема URL __fault/…; той самий збій у сторінці для статичного хостингу (Lab 3)
-  assets/loader.js      loadImage/loadAudio/loadJson з AbortSignal, loadAll з прогресом     (Lab 3)
-  arenas.js             вбудована арена за замовчуванням + перевірка arenas.json           (Lab 3)
-  audio.js              AudioContext, розблокування жестом, підписка на шину подій        (Lab 3)
-  hud.js                «+20» над астероїдами і стрічка повідомлень — теж через шину      (Lab 3)
-  lobby/lobby.js        class Lobby extends EventTarget: опитування, таймаут, abort        (Lab 3)
-  lobby/lobby-view.js   DOM лобі: лише слухає події Lobby                                  (Lab 3)
-  puzzles/puzzles.js    головоломки порядку з відповідями й поясненнями                    (Lab 3)
-  sim/                  симуляція: БЕЗ DOM і canvas (ESLint забороняє браузерні глобали в цій теці)
-    math.js             lerp, wrapAngle, lerpAngle
-    arena.js            розміри арени, обгортання країв (тор), wrappedDelta
-    vector.js           Vector2: чисті методи + *InPlace для гарячого шляху            (Lab 2)
-    rng.js              детермінований генератор випадкових чисел (mulberry32)        (Lab 2)
-    entity.js           class Entity: #id зі статичного лічильника, pos/vel/angle/radius (Lab 2)
-    ship.js             class Ship extends Entity, integrate(), #hp, fire(), ефекти    (Lab 1→2)
-    bullet.js           class Bullet extends Entity (TTL)                              (Lab 2)
-    asteroid.js         class Asteroid extends Entity (big/small, seeker)              (Lab 2)
-    pickup.js           class Pickup extends Entity + таблиця PICKUP_TYPES             (Lab 2)
-    explosion.js        class Explosion extends Entity (частинки)                      (Lab 2)
-    behaviors.js        компоненти поведінки: homing(), timeToLive(), spin()           (Lab 2)
-    collision.js        findCollisionsNaive(entities, arena) → пари                    (Lab 2)
-    rules.js            що означає зіткнення: таблиця обробників за парою kind         (Lab 2)
-    world.js            class World: Map<id, Entity>, step(), ofKind(), відкладений despawn (Lab 2)
-                        + world.events: CustomEvent "fired"/"hit"/"exploded"/"scored"      (Lab 3)
-  render/
-    canvas.js           canvas з урахуванням DPR, зміна розміру, камера
-    draw.js             фон, кораблі, кулі, астероїди, бонуси, вибухи, HUD (вибір за kind);
-                        спрайти через drawImage з прямокутником джерела, без них — вектори (Lab 3)
-    loading.js          екран завантаження на canvas: смуга прогресу і статус кожного файлу (Lab 3)
-test/lab01.test.js      детермінізм, незалежність від частоти кадрів, обмеження кроку, lerpAngle
-test/lab02.test.js      Vector2, ієрархія в один рівень, #hp, баг з this, World, колізії, композиція
-test/lab03.test.js      fetchJson, retry, loadAll (паралельність, прогрес, abort), Lobby, шина, головоломки
-scripts/bench-vector.js мікробенчмарк: чисті vs in-place операції з векторами
-scripts/make-sounds.js  синтезує звукові ефекти у WAV (без сторонніх файлів і ліцензій)
-scripts/make-sprites.js малює спрайтшити в headless Chromium (потрібен Playwright, разовий інструмент)
+package.json              npm workspaces: ["client", "server"]; скрипти dev/build/start/test для всього
+scripts/dev.js            запускає сервер (node --watch) і Vite поруч, без залежностей, і на Windows теж
+client/                   браузерна гра (Lab 1–3). Шляхи `src/…` у розділах Lab 1–3 = `client/src/…`
+  index.html, puzzles.html
+  vite.config.js          проксі /api /health /ws → сервер (Lab 4); middleware збоїв (Lab 3)
+  public/assets/          manifest.json, спрайтшити, звуки, arenas.json (+ навмисно битий)
+  src/
+    main.js               складає модулі: завантаження → лобі → кімната → гра
+    loop.js, input.js     цикл rAF з фіксованим кроком; ввід як замикання (Lab 1)
+    sim/                  симуляція без DOM: Entity і нащадки, World на Map, колізії, правила (Lab 2)
+    render/               canvas, малювання світу і спрайтів, екран завантаження (Lab 1–3)
+    net/http.js           fetchOk/fetchJson, withRetry (backoff + jitter) (Lab 3)
+    net/faults.js         схема URL __fault/… для галереї збоїв (Lab 3)
+    net/connection.js     class Connection: WebSocket з чергою, перепідключенням, подіями за type (Lab 4)
+    net/protocol.js       версія протоколу з боку клієнта (Lab 4)
+    assets/loader.js      loadAll: паралельно, з прогресом і скасуванням (Lab 3)
+    audio.js, hud.js      звук і HUD слухають шину подій світу (Lab 3)
+    lobby/lobby.js        class Lobby extends EventTarget: GET/POST /api/rooms, опитування (Lab 3–4)
+    lobby/lobby-view.js   DOM лобі + форма «Нова кімната» (Lab 3–4)
+    lobby/room-view.js    екран кімнати: пілоти + чат (Lab 4)
+  test/                   lab01–lab04: симуляція, завантаження, лобі, Connection
+  scripts/                make-sprites.js, make-sounds.js, bench-vector.js
+server/                   ігровий сервер (Lab 4)
+  .env.example            усі змінні оточення з поясненнями
+  src/
+    index.js              createGameServer(): http + WebSocket на одному порту; сигнали, graceful shutdown
+    config.js             PORT, HOST, LOG_DIR, ліміти… з process.env, перевірені й заморожені
+    http.js               маршрути API, віддача client/dist з MIME і захистом від ../
+    rooms.js              class Room extends EventEmitter; RoomManager (створення, ліміт, видалення порожніх)
+    protocol.js           протокол v1: типи повідомлень, перевірка кожного, коди закриття
+    ws.js                 життєвий цикл сокета: join за 5 с, heartbeat, ліміт частоти, повільні клієнти
+    ratelimit.js          token bucket
+    log/matchlog.js       NdjsonEncoder (Transform) + pipeline у файл, один файл на сесію кімнати
+    log/replay.js         async-генератор подій з NDJSON-файлу, рядок за рядком
+  test/server.test.js     конфіг, протокол, кімнати, HTTP, WebSocket, ліміти, логи, shutdown
+  scripts/                make-big-log.js, measure-backpressure.js, blocking-demo.js, crash-demo.js
+docs/img/                 скриншоти й графіки для цього README
 ```
 
 ---
@@ -565,3 +558,227 @@ Promise.resolve()
 
 Правило: `fetch` відхиляє проміс лише тоді, коли відповіді немає взагалі (мережа, DNS, CORS, abort). Будь-яка
 отримана відповідь, зокрема 404 чи 500, — це виконаний проміс.
+
+---
+
+## Lab 4 — Node.js: `EventEmitter`, стріми і WebSocket-сервер
+
+Гра отримала сервер. Це один процес Node на одному порту (8787):
+
+- `node:http` віддає зібраний клієнт і JSON API;
+- WebSocket на `/ws` тримає кімнати й чат;
+- кожна сесія кімнати пишеться стрімом у NDJSON-файл.
+
+Координати кораблів сервер поки не передає — це Lab 5. Гра в кімнаті поки локальна, як у Lab 3.
+
+![Два вікна в одній кімнаті: кожне бачить обох пілотів і спільний чат](docs/img/lab04-two-windows.png)
+
+### Що зроблено
+
+**M1 — HTTP без фреймворку.** Репозиторій розділено на npm workspaces `client/` і `server/`. Обидва пакети мають
+`"type": "module"`, вбудовані модулі імпортуються з префіксом `node:`.
+
+`server/src/http.js` має такі маршрути:
+
+| Маршрут                        | Що робить                                                                                                            |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                  | `status`, `uptimeS`, `rooms`, `connections`, `rssMB`                                                                 |
+| `GET /api/rooms`               | список кімнат у форматі, який розуміє лобі з Lab 3                                                                   |
+| `POST /api/rooms`              | створює кімнату. Тіло ≤ 4 KB, інакше 413. Не JSON — 400, не `application/json` — 415, погані поля — 400 з поясненням |
+| `GET /api/replays`             | список логів матчів                                                                                                  |
+| `GET /api/replays/:id`         | лог-файл, віддається стрімом                                                                                         |
+| `GET /api/replays/:id/summary` | кількість подій кожного типу                                                                                         |
+| решта                          | файли з `client/dist`                                                                                                |
+
+Деталі віддачі файлів:
+
+- **MIME:** `content-type` береться за розширенням, є `nosniff`. HTML має `no-cache`, решта — `max-age=3600`.
+- **Захист від `../`:** шлях спершу розкодовується, потім зводиться до абсолютного, а потім перевіряється, що він
+  лежить усередині `client/dist`. `/..%2f..%2fpackage.json` дає 403, `%00` теж дає 403. Простий `/../`
+  нормалізує ще `new URL`, тому він дає 404. Обидва випадки перевіряють тести, і ці запити йдуть «сирими», без
+  нормалізації `fetch`.
+
+Конфіг — `server/src/config.js`. Усі значення беруться з `process.env`: кожне перевіряється, усі помилки
+виводяться разом, об'єкт заморожений. `server/.env` читається через `process.loadEnvFile` — це те саме, що
+`--env-file`. Прапорець `--env-file-if-exists` не підійшов: разом із `node --watch` він падає, якщо файлу `.env`
+немає.
+
+Graceful shutdown на `SIGINT`/`SIGTERM` іде так:
+
+1. Сервер перестає приймати нові з'єднання.
+2. Усі сокети закриваються з кодом 1001.
+3. Кімнати закриваються, і їхні логи дописуються на диск.
+4. Процес виходить з кодом 0. Тест перевіряє це на справжньому дочірньому процесі.
+
+Якщо зупинка триває довше 5 с, процес виходить примусово.
+
+**M2 — кімнати і WebSocket.**
+
+`Room extends EventEmitter` (`server/src/rooms.js`) має події `open`, `join`, `leave`, `chat`, `empty` і `close`.
+Сокетів кімната не бачить. `RoomManager` створює кімнати (не більше `MAX_ROOMS`) і видаляє кімнату, створену
+через API, щойно вона спорожніла. Таку кімнату він видаляє і тоді, коли за хвилину до неї ніхто не зайшов.
+Стандартні кімнати лишаються завжди.
+
+Протокол v1 (`server/src/protocol.js`) — JSON з полем `type`.
+
+| Напрям          | Повідомлення                                   |
+| --------------- | ---------------------------------------------- |
+| клієнт → сервер | `join {v, room, name}`, `chat {text}`, `leave` |
+| сервер → клієнт | `welcome`, `roster`, `chat`, `system`, `error` |
+
+Сервер перевіряє **кожне** повідомлення: дозволені лише відомі типи й поля, у кожного поля є свої довжини.
+Порушення закриває сокет із власним кодом:
+
+| Код  | Причина                                           |
+| ---- | ------------------------------------------------- |
+| 4000 | не JSON                                           |
+| 4001 | невідомий тип                                     |
+| 4002 | неправильна форма                                 |
+| 4003 | немає `join` за 5 с                               |
+| 4004 | кімнати немає або вона повна                      |
+| 4005 | інша версія протоколу                             |
+| 4006 | чат до `join`                                     |
+| 4008 | ліміт частоти                                     |
+| 1009 | кадр більший за `maxPayload` (закриває сама `ws`) |
+
+Життєвий цикл сокета — `server/src/ws.js`:
+
+- Сокет повинен надіслати `join` протягом 5 с.
+- Ping йде кожні 15 с. Сокет, що пропустив два pong поспіль, сервер обриває (`terminate`).
+- У **кожного** сокета є слухач `"error"`.
+- `roster` розсилається на кожен вхід і вихід, `chat` — усім у кімнаті.
+
+`client/src/net/connection.js` — обгортка над сокетом на клієнті:
+
+- повідомлення приходять подіями за їхнім `type`;
+- поки з'єднання немає, `send()` кладе повідомлення в чергу;
+- після неочікуваного розриву вона перепідключається з паузою, що росте (backoff + jitter);
+- після кодів, які означають «ти помилився» (4004, 4008, 1009…), вона не перепідключається.
+
+Подія `open` настає і після кожного перепідключення, тому клієнт сам входить у кімнату знову. Я перевірив це
+вживу: перезапустив сервер під відкритою сторінкою. Сторінка перепідключилась через 0,4 с, повернулась у кімнату,
+а повідомлення, набране під час розриву, дійшло з черги.
+
+Лобі з Lab 3 тепер працює зі справжнім `GET /api/rooms` і має форму «Нова кімната» (`POST`).
+
+**M3 — логи матчів стрімами.** Сесія кімнати триває від першого гравця, що зайшов, до останнього, що вийшов.
+Кожна сесія пишеться в окремий файл `server/logs/<кімната>-<час>.ndjson`:
+
+```
+події кімнати ──events.on──▶ Readable.from ──▶ NdjsonEncoder ──▶ createWriteStream
+                             (object mode)     (Transform)       (Writable)
+                └──────────────────────── pipeline ───────────────────────┘
+```
+
+Помилку, яку я знайшов на цьому кроці, варто записати. Перший лог не містив `join` першого гравця. Тіло
+генератора починає виконуватись лише тоді, коли стрім уперше просить дані, — а це на тік пізніше, ніж подія вже
+відбулась. Тепер підписка (`events.on`) створюється одразу, ще до генератора.
+
+`server/src/log/replay.js` — async-генератор над `createReadStream` і `readline`. Він видає по одній події на
+рядок і не читає файл цілим. Через нього працює `/summary`, а сам файл віддається через
+`pipeline(createReadStream(file), res)`.
+
+**Експеримент з backpressure.** Я згенерував лог на 200 MB (`node scripts/make-big-log.js 200`) і завантажив його
+в Chromium. Мережу в DevTools обмежено до 4 MB/с, тож одне завантаження триває 53 с. Кожні 250 мс скрипт записував
+`rss` сервера (`node scripts/measure-backpressure.js`, дані — у `docs/data/lab04-rss.csv`). Завантажень було два:
+стрімом і «наївно» — `readFile` усього файлу, потім `res.end(buffer)`.
+
+![rss сервера: стрім лишається на 73–90 MB, readFile одразу стрибає до 281 MB і тримається там до кінця](docs/img/lab04-rss.png)
+
+Стрім тримається на 73–90 MB увесь час. `pipeline` читає наступний шматок файлу лише тоді, коли `res.write()`
+віддав попередній і настала подія `"drain"`. У пам'яті сервера лежить кілька шматків, а не весь файл.
+
+Наївний варіант за 0,3 с стрибає до 281 MB: це +200 MB, тобто весь файл. Ця пам'ять зайнята всі 53 с, поки
+повільний клієнт тягне відповідь. Десять таких клієнтів одночасно — це вже 2 GB.
+
+**M4 — ліміти.**
+
+| Що                  | Як                                                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Частота повідомлень | token bucket на кожне з'єднання: 10 за секунду, сплеск до 20, далі закриття з кодом 4008                                                                                               |
+| Розмір кадру        | `maxPayload` 4 KB, далі 1009                                                                                                                                                           |
+| Кімнати й гравці    | `MAX_ROOMS` 50, `MAX_PLAYERS_PER_ROOM` 8, `MAX_CONNECTIONS` 500 (на handshake відповідь 503)                                                                                           |
+| Повільний клієнт    | `bufferedAmount` > 64 KB: чат і системні повідомлення для нього пропускаються, а `roster` і `welcome` доходять завжди. > 1 MB: сокет обривається, бо його черга живе в пам'яті сервера |
+
+Кожне правило перевіряє тест у `server/test/server.test.js`. Для повільного клієнта тест підміняє `bufferedAmount`
+серверного сокета.
+
+### Цикл подій Node і що буде, якщо його заблокувати
+
+JavaScript у Node виконується в одному потоці. libuv крутить цикл фазами:
+
+1. **timers** — `setTimeout`, `setInterval`;
+2. **pending callbacks**;
+3. **poll** — I/O: нові з'єднання, дані з сокетів, готові файли;
+4. **check** — `setImmediate`;
+5. **close callbacks**.
+
+Між фазами, а точніше після кожного колбека, Node спершу виконує всю чергу `process.nextTick`, а потім мікрозадачі
+промісів. Читання файлів і DNS libuv виконує у своєму пулі потоків, а мережевий I/O — через epoll/kqueue/IOCP. Тому
+очікування нікого не блокує. Блокує лише **наш синхронний код**.
+
+Я перевірив порядок сам:
+
+- Програма з `nextTick`, проміса, `setTimeout(0)` і `setImmediate` щоразу починає з `n p`.
+- Порядок `setTimeout(0)` і `setImmediate` з головного модуля нестабільний: за 60 запусків вийшло 58 разів `i t` і
+  2 рази `t i`. Він залежить від того, чи встиг минути 1 мс до першої фази timers.
+- Усередині колбека `fs.readFile` порядок стабільний: 20 з 20 разів `i t`, бо після poll завжди йде check.
+
+**Демонстрація блокування** — `node scripts/blocking-demo.js`. Гравець A шле в чат рядок кожні 50 мс, гравець B
+вимірює, за скільки кожен рядок до нього доходить. На 1001-й мс третій клієнт викликає `GET /api/slow?ms=300` —
+це маршрут із циклом зайнятого очікування, який є лише з `DEBUG_ROUTES=true`.
+
+```
+медіана затримки до /api/slow: 0.8 ms
+  1022 ms ->    2 ms
+  1073 ms ->  262 ms ██████████████████████████
+  1127 ms ->  207 ms █████████████████████
+  1177 ms ->  157 ms ████████████████
+  1228 ms ->  107 ms ███████████
+  1278 ms ->   56 ms ██████
+  1334 ms ->    1 ms
+```
+
+Поки працює цикл, сервер не читає жоден сокет. Усі повідомлення, надіслані за ці 300 мс, лежать у буферах ядра. Коли
+цикл закінчується, вони виходять одним пакетом, і звідси ці «сходинки». З двома гравцями це лише затримка в чаті,
+а в Lab 5 те саме означатиме 18 пропущених тіків симуляції для **кожного** гравця на сервері. Важку роботу треба
+ділити на шматки або виносити у `worker_threads` (Lab 7).
+
+### Чому необроблений `"error"` кладе весь сервер
+
+`node scripts/crash-demo.js` запускає чотири маленькі програми:
+
+```
+## emitter 'error', no listener
+exit code: 1
+stderr: throw er; // Unhandled 'error' event | Error: ECONNRESET: client vanished
+
+## emitter 'error', with a listener (the fix)
+exit code: 0
+stdout: logged: ECONNRESET: client vanished - server keeps running | still serving: yes
+
+## unhandled rejection
+exit code: 1
+stderr: Error: room file is corrupt
+
+## rejection handled (the fix)
+exit code: 0
+stdout: logged: room file is corrupt - request answered with 500 | still serving: yes
+```
+
+Якщо в `EventEmitter` немає слухача `"error"`, Node кидає помилку на `emit`, і процес завершується разом із **усіма**
+кімнатами. Для одного сервера на всіх гравців це означає, що один клієнт, який обірвав з'єднання (ECONNRESET),
+вимикає гру всім. Тому `"error"` слухають:
+
+- кожен WebSocket;
+- сирий сокет під час upgrade;
+- сам `WebSocketServer`.
+
+Помилки стрімів ловить `pipeline` і повертає їх як rejection.
+
+Проміси без обробки помилок у Node 22 теж завершують процес з кодом 1. Тому кожен обробник HTTP працює в `try/catch`
+і відповідає 500, а не падає.
+
+Експеримент з теорії про `maxPayload` дає таке: сервер отримує `socket error: Max payload size exceeded`
+(`WS_ERR_UNSUPPORTED_MESSAGE_LENGTH`), а клієнт — `close 1009`. Ще один факт про байти: у `Buffer.from("привіт")`
+12 байтів, а в рядку `"привіт"` 6 символів. Тому `content-length` рахується через `Buffer.byteLength`.

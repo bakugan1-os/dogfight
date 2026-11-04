@@ -1,0 +1,16 @@
+{
+  "name": "@dogfight/server",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "Game server: node:http + WebSocket rooms, chat, match logs as streams.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.22.1"
+  }
+}

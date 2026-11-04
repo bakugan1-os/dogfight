@@ -13,9 +13,10 @@ export default [
     },
   },
   {
-    // The simulation must stay DOM-free: no browser globals are allowed in src/sim.
+    // The simulation must stay DOM-free: no browser globals are allowed in src/sim —
+    // except EventTarget/CustomEvent, which are platform-neutral (Node 22 has them too).
     files: ["src/sim/**/*.js"],
-    languageOptions: { globals: {} },
+    languageOptions: { globals: { EventTarget: "readonly", CustomEvent: "readonly" } },
   },
   {
     files: ["test/**/*.js", "scripts/**/*.js", "*.config.js"],

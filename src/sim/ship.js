@@ -151,6 +151,8 @@ export class Ship extends Entity {
       );
     }
     world.spawn(bullet);
+    // `?.`: tests call fire() with a bare { spawn } stub that has no event bus.
+    world.notify?.("fired", { playerId: this.playerId, x: bullet.pos.x, y: bullet.pos.y });
     this.cooldown = this.effects.has("rapid")
       ? SHIP_PARAMS.rapidCooldown
       : SHIP_PARAMS.fireCooldown;

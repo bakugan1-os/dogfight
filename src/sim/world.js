@@ -2,6 +2,10 @@
 // simulation tick, runs collision detection + rules, and sweeps the dead at the END of the
 // step. Spawns requested mid-step are queued: a Map iterator DOES visit entries added during
 // iteration, so a bullet spawned while updating would otherwise be moved in the same step.
+//
+// Lab 3: the world TELLS, it never CALLS. Things that happen ("fired", "hit", "exploded",
+// "picked", "scored", "message") are dispatched as CustomEvents on `world.events`; audio and
+// HUD subscribe from outside. This file imports no audio/HUD module — a test checks that.
 
 import { createArena, wrapPosition, wrappedDelta } from "./arena.js";
 import { createRng } from "./rng.js";
@@ -34,6 +38,8 @@ export class World {
     this.arena = options.arena ?? createArena();
     this.rng = createRng(this.config.seed);
     this.findCollisions = options.findCollisions ?? findCollisionsNaive; // swappable system
+    /** Event bus. Pass one in to keep listeners across restarts; EventTarget is in Node 22 too. */
+    this.events = options.events ?? new EventTarget();
     this.time = 0;
     this.tick = 0;
     /** @type {Map<number, {id:number,name:string,color:string,score:number,shipId:number|null,respawnIn:number}>} */
@@ -84,19 +90,31 @@ export class World {
     return player;
   }
 
+  nameOf(playerId) {
+    return this.players.get(playerId)?.name ?? `P${playerId}`;
+  }
+
   shipOf(playerId) {
     const player = this.players.get(playerId);
     const ship = player?.shipId != null ? this.get(player.shipId) : undefined;
     return ship?.alive ? ship : undefined;
   }
 
-  addScore(playerId, points) {
+  addScore(playerId, points, at = null) {
     const player = this.players.get(playerId);
-    if (player) player.score += points;
+    if (!player) return;
+    player.score += points;
+    this.notify("scored", { playerId, points, total: player.score, x: at?.x, y: at?.y });
+  }
+
+  /** Dispatches a CustomEvent on the bus. Synchronous: listeners run before this returns. */
+  notify(type, detail = {}) {
+    this.events.dispatchEvent(new CustomEvent(type, { detail: { time: this.time, ...detail } }));
   }
 
   emit(message) {
     this.messages.push(message);
+    this.notify("message", { text: message });
   }
 
   onShipDestroyed(ship, killerId) {
@@ -112,11 +130,17 @@ export class World {
     );
     const player = this.players.get(ship.playerId);
     if (player) player.respawnIn = this.config.respawnDelay;
+    this.notify("exploded", {
+      kind: "ship",
+      playerId: ship.playerId,
+      x: ship.pos.x,
+      y: ship.pos.y,
+    });
     if (killerId != null && killerId !== ship.playerId) {
-      this.addScore(killerId, this.config.shipKillScore);
-      this.emit(`P${killerId} збив P${ship.playerId}`);
+      this.addScore(killerId, this.config.shipKillScore, ship.pos);
+      this.emit(`${this.nameOf(killerId)} збив ${this.nameOf(ship.playerId)}`);
     } else {
-      this.emit(`P${ship.playerId} розбився`);
+      this.emit(`${this.nameOf(ship.playerId)} розбився`);
     }
   }
 

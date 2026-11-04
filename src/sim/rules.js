@@ -59,7 +59,13 @@ function destroyAsteroid(world, asteroid, byPlayerId) {
       world.spawn(new Asteroid({ pos, vel, size: "small", rng: world.rng }));
     }
   }
-  world.addScore(byPlayerId, asteroid.size === "big" ? 20 : 10);
+  world.notify("exploded", {
+    kind: "asteroid",
+    size: asteroid.size,
+    x: asteroid.pos.x,
+    y: asteroid.pos.y,
+  });
+  world.addScore(byPlayerId, asteroid.size === "big" ? 20 : 10, asteroid.pos);
 }
 
 const HANDLERS = {
@@ -68,12 +74,27 @@ const HANDLERS = {
     asteroid.hp -= bullet.damage;
     asteroid.vel.addScaledInPlace(bullet.vel, 0.02); // a little knock-back
     if (asteroid.hp <= 0) destroyAsteroid(world, asteroid, bullet.ownerId);
+    else
+      world.notify("hit", {
+        target: "asteroid",
+        by: bullet.ownerId,
+        x: bullet.pos.x,
+        y: bullet.pos.y,
+      });
   },
 
   "bullet|ship"(world, bullet, ship) {
     if (bullet.ownerId === ship.playerId) return; // no friendly fire on yourself
     bullet.kill();
+    const hit = {
+      target: "ship",
+      playerId: ship.playerId,
+      by: bullet.ownerId,
+      x: ship.pos.x,
+      y: ship.pos.y,
+    };
     if (ship.damage(bullet.damage)) world.onShipDestroyed(ship, bullet.ownerId);
+    else world.notify("hit", hit);
   },
 
   "asteroid|ship"(world, asteroid, ship) {
@@ -81,6 +102,14 @@ const HANDLERS = {
     if (ship.contactCooldown > 0) return;
     ship.contactCooldown = 0.5;
     if (ship.damage(ASTEROID_CONTACT_DAMAGE)) world.onShipDestroyed(ship, null);
+    else
+      world.notify("hit", {
+        target: "ship",
+        playerId: ship.playerId,
+        by: null,
+        x: ship.pos.x,
+        y: ship.pos.y,
+      });
   },
 
   "asteroid|asteroid"(world, a, b) {
@@ -90,7 +119,13 @@ const HANDLERS = {
   "pickup|ship"(world, pickup, ship) {
     pickup.kill();
     ship.applyEffect(pickup.type, pickup.spec.duration);
-    world.emit(`P${ship.playerId}: ${pickup.type}`);
+    world.notify("picked", {
+      playerId: ship.playerId,
+      type: pickup.type,
+      x: pickup.pos.x,
+      y: pickup.pos.y,
+    });
+    world.emit(`${world.nameOf(ship.playerId)}: ${pickup.type}`);
   },
 
   "ship|ship"(world, a, b) {

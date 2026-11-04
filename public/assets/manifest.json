@@ -1,0 +1,17 @@
+{
+  "version": 3,
+  "sprites": {
+    "ships": { "url": "sprites/ships.png", "cell": 64, "optional": true },
+    "asteroids": { "url": "sprites/asteroids.png", "cell": 96, "optional": true },
+    "items": { "url": "sprites/items.png", "cell": 32, "optional": true }
+  },
+  "sounds": {
+    "shoot": { "url": "sfx/shoot.wav", "optional": true },
+    "hit": { "url": "sfx/hit.wav", "optional": true },
+    "explosion": { "url": "sfx/explosion.wav", "optional": true },
+    "pickup": { "url": "sfx/pickup.wav", "optional": true }
+  },
+  "data": {
+    "arenas": { "url": "arenas.json" }
+  }
+}

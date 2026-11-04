@@ -34,7 +34,11 @@ export function createInput(target) {
       // passed here by reference. That's the Lab 2 `this` bug — pass arrows, not methods.
       for (const callback of listeners.get(e.code) ?? []) callback(e);
     }
-    if (GAME_KEYS.has(e.code)) e.preventDefault(); // no page scrolling on arrows / space
+    // No page scrolling on arrows / space — but let buttons and text fields keep their keys
+    // (Lab 3: Enter/Space must still press the lobby's buttons, Space must type in the name).
+    const tag = e.target?.tagName;
+    const formField = tag === "INPUT" || tag === "BUTTON" || tag === "TEXTAREA";
+    if (GAME_KEYS.has(e.code) && !formField) e.preventDefault();
   };
   const onKeyUp = (e) => {
     down.delete(e.code);

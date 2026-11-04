@@ -130,10 +130,31 @@ export function interpolate(entity, alpha, arena) {
   };
 }
 
-function drawShipEntity(ctx, ship, x, y, angle, time) {
+/**
+ * Lab 3: one cell of a sprite sheet. `drawImage` with a SOURCE rectangle (sx, sy, sw, sh)
+ * cuts the frame out of the sheet; the destination is centred on (x, y) and rotated.
+ */
+export function drawSprite(ctx, sheet, col, row, x, y, angle, size) {
+  const { image, cell } = sheet;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.drawImage(image, col * cell, row * cell, cell, cell, -size / 2, -size / 2, size, size);
+  ctx.restore();
+}
+
+const PICKUP_COLUMN = { shield: 2, rapid: 3, homing: 4 };
+
+function drawShipEntity(ctx, ship, x, y, angle, time, sprites, label) {
   // Blink while invulnerable after (re)spawn.
   if (ship.invulnerable > 0 && Math.floor(time * 10) % 2 === 0) ctx.globalAlpha = 0.35;
-  drawShip(ctx, x, y, angle, ship.thrust, time, ship.color);
+  if (sprites.ships) {
+    const col = ship.thrust ? 1 + (Math.floor(time * 20) % 2) : 0;
+    const row = Math.min(1, Math.max(0, ship.playerId - 1));
+    drawSprite(ctx, sprites.ships, col, row, x, y, angle, 40); // sheet ship r=22.4 px -> 14 units
+  } else {
+    drawShip(ctx, x, y, angle, ship.thrust, time, ship.color); // fallback: Lab 1 vector art
+  }
   ctx.globalAlpha = 1;
 
   if (ship.effects.has("shield")) {
@@ -154,12 +175,13 @@ function drawShipEntity(ctx, ship, x, y, angle, time) {
   ctx.fillStyle = ship.color;
   ctx.font = "bold 11px ui-monospace, Consolas, monospace";
   ctx.textAlign = "center";
-  ctx.fillText(`P${ship.playerId}`, x, y - ship.radius - 20);
+  ctx.fillText(label, x, y - ship.radius - 20);
   ctx.textAlign = "start";
 }
 
-function drawBullet(ctx, bullet, x, y, angle) {
+function drawBullet(ctx, bullet, x, y, angle, sprites) {
   const homing = bullet.behaviors.some((b) => b.name === "homing");
+  if (sprites.items) return drawSprite(ctx, sprites.items, homing ? 1 : 0, 0, x, y, angle, 22);
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
@@ -168,8 +190,21 @@ function drawBullet(ctx, bullet, x, y, angle) {
   ctx.restore();
 }
 
-function drawAsteroid(ctx, asteroid, x, y, angle) {
+function drawAsteroid(ctx, asteroid, x, y, angle, sprites) {
   const { radius, shape } = asteroid;
+  if (sprites.asteroids) {
+    const size = (96 * radius) / 44; // the sheet's rock has radius 44 px in a 96 px cell
+    return drawSprite(
+      ctx,
+      sprites.asteroids,
+      asteroid.id % 4,
+      asteroid.seeker ? 1 : 0,
+      x,
+      y,
+      angle,
+      size,
+    );
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
@@ -190,9 +225,13 @@ function drawAsteroid(ctx, asteroid, x, y, angle) {
   ctx.restore();
 }
 
-function drawPickup(ctx, pickup, x, y, angle, time) {
+function drawPickup(ctx, pickup, x, y, angle, time, sprites) {
   const { color, label } = pickup.spec;
   const pulse = 1 + Math.sin(time * 5) * 0.08;
+  if (sprites.items) {
+    const col = PICKUP_COLUMN[pickup.type] ?? 2;
+    return drawSprite(ctx, sprites.items, col, 0, x, y, angle * 0.25, 36 * pulse);
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.save();
@@ -230,7 +269,7 @@ function drawExplosion(ctx, explosion, alpha, step) {
  * Draws every entity. Dispatch on `kind` (data) instead of a draw() method on each class:
  * the simulation classes stay free of canvas code and can run on the server in Lab 4–5.
  */
-export function drawWorld(ctx, world, alpha, time, step) {
+export function drawWorld(ctx, world, alpha, time, step, sprites = {}) {
   const { arena } = world;
   for (const e of world) {
     if (e.kind === "explosion") {
@@ -242,13 +281,13 @@ export function drawWorld(ctx, world, alpha, time, step) {
     drawWrapped(arena, x, y, margin, (dx, dy) => {
       switch (e.kind) {
         case "ship":
-          return drawShipEntity(ctx, e, dx, dy, angle, time);
+          return drawShipEntity(ctx, e, dx, dy, angle, time, sprites, world.nameOf(e.playerId));
         case "bullet":
-          return drawBullet(ctx, e, dx, dy, angle);
+          return drawBullet(ctx, e, dx, dy, angle, sprites);
         case "asteroid":
-          return drawAsteroid(ctx, e, dx, dy, angle);
+          return drawAsteroid(ctx, e, dx, dy, angle, sprites);
         case "pickup":
-          return drawPickup(ctx, e, dx, dy, angle, time);
+          return drawPickup(ctx, e, dx, dy, angle, time, sprites);
       }
     });
   }

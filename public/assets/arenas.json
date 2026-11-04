@@ -1,0 +1,6 @@
+{
+  "classic": { "name": "Класика", "asteroids": 5, "seekerChance": 0.25, "pickupEvery": 7 },
+  "belt": { "name": "Пояс астероїдів", "asteroids": 9, "seekerChance": 0.1, "pickupEvery": 6 },
+  "calm": { "name": "Тиха гавань", "asteroids": 3, "seekerChance": 0, "pickupEvery": 5 },
+  "hunters": { "name": "Мисливці", "asteroids": 4, "seekerChance": 0.9, "pickupEvery": 8 }
+}

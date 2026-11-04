@@ -1,0 +1,49 @@
+{
+  "rooms": [
+    {
+      "id": "r-101",
+      "name": "Дуель у поясі",
+      "arena": "belt",
+      "mode": "duel",
+      "players": 1,
+      "maxPlayers": 2,
+      "host": "Orion"
+    },
+    {
+      "id": "r-102",
+      "name": "Тренування",
+      "arena": "calm",
+      "mode": "solo",
+      "players": 0,
+      "maxPlayers": 1,
+      "host": "—"
+    },
+    {
+      "id": "r-103",
+      "name": "Полювання",
+      "arena": "hunters",
+      "mode": "duel",
+      "players": 1,
+      "maxPlayers": 2,
+      "host": "Vega"
+    },
+    {
+      "id": "r-104",
+      "name": "Класична арена",
+      "arena": "classic",
+      "mode": "duel",
+      "players": 0,
+      "maxPlayers": 2,
+      "host": "—"
+    },
+    {
+      "id": "r-105",
+      "name": "Турнірна",
+      "arena": "classic",
+      "mode": "duel",
+      "players": 2,
+      "maxPlayers": 2,
+      "host": "Lyra"
+    }
+  ]
+}

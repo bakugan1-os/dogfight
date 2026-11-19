@@ -1,0 +1,7 @@
+{
+  // The root: only the repo-level tooling (scripts/dev.ts, eslint config). Each package has its
+  // own tsconfig; `npm run typecheck` checks all four.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["scripts/**/*.ts"]
+}

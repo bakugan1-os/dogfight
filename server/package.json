@@ -1,17 +1,19 @@
 {
   "name": "@dogfight/server",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Game server: node:http + WebSocket rooms, chat, match logs as streams.",
-  "main": "src/index.js",
+  "main": "src/index.ts",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "test": "node --test"
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@dogfight/shared": "*",
     "ws": "^8.22.1",
-    "@dogfight/shared": "*"
+    "zod": "^4.6.7"
   }
 }

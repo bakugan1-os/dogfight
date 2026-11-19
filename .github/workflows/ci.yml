@@ -1,0 +1,26 @@
+# Lab 6: types are checked on every push. Vite and Node only STRIP types — they never check
+# them — so without this job a type error could reach main unnoticed. Lab 7 extends this
+# workflow (coverage, e2e, build).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build

@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.base.json",
+  // Runs in Node AND the browser: no DOM lib. @types/node only for EventTarget-free tests and
+  // node:test; a test forbids platform globals in shared/sim, shared/protocol and shared/codec.
+  "compilerOptions": { "types": ["node"] },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -47,7 +47,9 @@ function client(url, options) {
   const ws = new WebSocket(url, options);
   const inbox = [];
   const waiters = [];
-  ws.on("message", (data) => {
+  const snapshots = [];
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) return snapshots.push(data); // Lab 5: binary snapshots, 30 per second
     const msg = JSON.parse(String(data));
     const i = waiters.findIndex((w) => w.type === msg.type);
     if (i >= 0) waiters.splice(i, 1)[0].resolve(msg);
@@ -56,6 +58,7 @@ function client(url, options) {
   ws.on("error", () => {});
   return {
     ws,
+    snapshots,
     opened: once(ws, "open"),
     closed: new Promise((resolve) =>
       ws.on("close", (code, reason) => resolve({ code, reason: String(reason) })),
@@ -254,7 +257,7 @@ test("ws: unknown type, chat before join, full room -> specific close codes", as
   const solo = await joined(ws, "r-102", "Solo"); // maxPlayers 1
   const c3 = client(ws);
   await c3.opened;
-  c3.send({ type: "join", v: 1, room: "r-102", name: "Late" });
+  c3.send({ type: "join", v: PROTOCOL_VERSION, room: "r-102", name: "Late" });
   assert.equal((await c3.closed).code, CLOSE.ROOM_UNAVAILABLE);
   solo.ws.close();
 });
@@ -281,7 +284,7 @@ test("ws: a client that never answers pings is terminated after two misses", asy
   t.after(() => game.stop());
   const c = client(ws, { autoPong: false }); // simulates a dead peer behind a NAT
   await c.opened;
-  c.send({ type: "join", v: 1, room: "r-104", name: "Ghost" });
+  c.send({ type: "join", v: PROTOCOL_VERSION, room: "r-104", name: "Ghost" });
   const t0 = performance.now();
   const { code } = await c.closed;
   assert.equal(code, 1006, "terminated: no close frame at all");

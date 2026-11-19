@@ -5,10 +5,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createAccumulator } from "../src/loop.js";
-import { integrate } from "../src/sim/ship.js";
-import { Vector2 } from "../src/sim/vector.js";
-import { createArena, wrapPosition, wrappedDelta } from "../src/sim/arena.js";
-import { lerpAngle, wrapAngle } from "../src/sim/math.js";
+import { integrate } from "@dogfight/shared/sim/ship.js";
+import { Vector2 } from "@dogfight/shared/sim/vector.js";
+import { createArena, wrapPosition, wrappedDelta } from "@dogfight/shared/sim/arena.js";
+import { lerpAngle, wrapAngle } from "@dogfight/shared/sim/math.js";
 
 const STEP = 1 / 60;
 

@@ -2,7 +2,7 @@
 // against `pos.addScaledInPlace(vel, dt)` (no allocation). Run: node scripts/bench-vector.js
 // Numbers vary by machine; the README records one run.
 
-import { Vector2 } from "../src/sim/vector.js";
+import { Vector2 } from "@dogfight/shared/sim/vector.js";
 
 const ENTITIES = 5000;
 const STEPS = 600; // 10 s of simulation at 60 Hz

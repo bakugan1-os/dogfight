@@ -13,14 +13,26 @@ export default [
     },
   },
   {
-    // The simulation must stay DOM-free: no browser globals are allowed in client/src/sim —
-    // except EventTarget/CustomEvent, which are platform-neutral (Node 22 has them too).
-    files: ["client/src/sim/**/*.js"],
-    languageOptions: { globals: { EventTarget: "readonly", CustomEvent: "readonly" } },
+    // shared/ runs in BOTH the browser and Node: no DOM globals and no Node globals — only the
+    // platform-neutral ones both have (EventTarget, CustomEvent, AbortController, DataView…).
+    files: ["shared/**/*.js"],
+    ignores: ["shared/test/**"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        EventTarget: "readonly",
+        CustomEvent: "readonly",
+        AbortController: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
+      },
+    },
   },
   {
     files: [
       "server/**/*.js",
+      "shared/test/**/*.js",
       "scripts/**/*.js",
       "client/test/**/*.js",
       "client/scripts/**/*.js",

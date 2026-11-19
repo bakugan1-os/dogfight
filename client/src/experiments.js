@@ -22,6 +22,12 @@
 //   ?lobby=down         rooms answer HTTP 503
 //   ?lobby=0            skip the lobby (Lab 1/2 experiment flags skip it too)
 //   ?static=1           static host: run the fault rules in the page (src/net/faults.js)
+// Lab 5 (network game):
+//   ?lag=100&jitter=30&drop=0.02   server-side latency injector for this connection (dev only)
+//   ?codec=json         JSON snapshots/inputs instead of binary (for the size comparison)
+//   ?predict=0          no client-side prediction: the M1 "dumb client"
+//   ?breakdet=1         Math.random() in the client's integrate: the M2 determinism experiment
+//   ?interp=100         interpolation delay for remote entities, ms
 
 import { faultUrl } from "./net/faults.js";
 
@@ -40,6 +46,16 @@ export function readExperimentFlags(search) {
     sequential: params.get("load") === "sequential",
     lobby: params.get("lobby"),
     staticHost: params.get("static") === "1",
+    // Lab 5 netcode experiments
+    codec: params.get("codec") === "json" ? "json" : "binary",
+    netsim: {
+      lag: Number(params.get("lag")) || 0,
+      jitter: Number(params.get("jitter")) || 0,
+      drop: Number(params.get("drop")) || 0,
+    },
+    predict: params.get("predict") !== "0",
+    breakDeterminism: params.get("breakdet") === "1",
+    interpDelay: params.has("interp") ? Number(params.get("interp")) : 100,
   });
 }
 

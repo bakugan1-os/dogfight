@@ -1,15 +1,19 @@
-// Protocol v1 — JSON text frames, one object per message, always with a `type`.
+// Protocol v2 — control messages are JSON text frames with a `type`; since Lab 5 the real-time
+// traffic (input up, snapshot down) uses the codecs in shared/codec (binary by default).
 // The server validates EVERY incoming message: it never trusts a client, not even our own
 // (anyone can open the DevTools console and send whatever they like).
 //
 // client -> server                         server -> client
-//   { type:"join", v:1, room, name }         { type:"welcome", v:1, playerId, room }
-//   { type:"chat", text }                    { type:"roster", room, players:[{id,name}] }
+//   { type:"join", v:2, room, name }         { type:"welcome", v:2, playerId, slot, room, tickRate }
+//   { type:"chat", text }                    { type:"roster", room, players:[{id,name,slot}] }
+//   { type:"ping", t }                       { type:"pong", t, tick }
+//   { type:"input", seq, tick, b }  (?codec=json only; otherwise a binary INPUT frame)
+//   { type:"netsim", lag, jitter, drop }  (only if the server allows the latency injector)
 //   { type:"leave" }                         { type:"chat", from:{id,name}, text, t }
 //                                            { type:"system", text, t }
 //                                            { type:"error", code, message }
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2; // v2 (Lab 5): binary input/snapshot frames, slots
 
 /** WebSocket close codes. 4000-4999 are ours (RFC 6455 §7.4.2: reserved for applications). */
 export const CLOSE = Object.freeze({
@@ -44,6 +48,19 @@ const SCHEMAS = {
     text: (v) => isString(v, LIMITS.text) || `text: 1..${LIMITS.text} chars`,
   },
   leave: {},
+  ping: {
+    t: (v) => (Number.isFinite(v) && v >= 0) || "t: a timestamp",
+  },
+  input: {
+    seq: (v) => (Number.isInteger(v) && v > 0) || "seq: positive integer",
+    tick: (v) => (Number.isInteger(v) && v >= 0) || "tick: integer",
+    b: (v) => (Number.isInteger(v) && v >= 0 && v <= 31) || "b: button bits 0..31",
+  },
+  netsim: {
+    lag: (v) => (Number.isFinite(v) && v >= 0 && v <= 2000) || "lag: 0..2000 ms",
+    jitter: (v) => (Number.isFinite(v) && v >= 0 && v <= 1000) || "jitter: 0..1000 ms",
+    drop: (v) => (Number.isFinite(v) && v >= 0 && v <= 0.5) || "drop: 0..0.5",
+  },
 };
 
 /**
@@ -52,7 +69,8 @@ const SCHEMAS = {
  * @returns {{ok:true, msg:object} | {ok:false, code:number, reason:string}}
  */
 export function parseClientMessage(data, isBinary = false) {
-  if (isBinary) return { ok: false, code: CLOSE.BAD_SHAPE, reason: "binary frames not supported" };
+  if (isBinary)
+    return { ok: false, code: CLOSE.BAD_SHAPE, reason: "binary frames go to the codec" };
   let msg;
   try {
     msg = JSON.parse(String(data));
@@ -83,8 +101,20 @@ export function parseClientMessage(data, isBinary = false) {
 
 /** Builders for server -> client messages: one place decides their shape. */
 export const out = {
-  welcome: (playerId, room) => ({ type: "welcome", v: PROTOCOL_VERSION, playerId, room }),
-  roster: (room) => ({ type: "roster", room: room.id, players: room.roster() }),
+  welcome: (playerId, slot, room, extra = {}) => ({
+    type: "welcome",
+    v: PROTOCOL_VERSION,
+    playerId,
+    slot,
+    room,
+    ...extra,
+  }),
+  roster: (room, slotOf = () => undefined) => ({
+    type: "roster",
+    room: room.id,
+    players: room.roster().map((p) => ({ ...p, slot: slotOf(p.id) })),
+  }),
+  pong: (t, tick) => ({ type: "pong", t, tick }),
   chat: (player, text, t) => ({
     type: "chat",
     from: { id: player.id, name: player.name },

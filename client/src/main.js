@@ -1,11 +1,12 @@
 // Composition root: creates every module and wires them together. No game rules live here.
 // Flow:  loading screen (await loadAll) -> lobby (HTTP, polling) -> room (WebSocket: roster +
-// chat, Lab 4) -> game (still local: positions cross the wire in Lab 5).
+// chat, Lab 4) -> game: since Lab 5 the SERVER runs it; this page sends inputs and draws
+// snapshots (net/netgame.js). The local game remains for the Lab 1–3 experiment flags.
 
 import { createLoop } from "./loop.js";
 import { createInput, readControls, BINDINGS } from "./input.js";
-import { World } from "./sim/world.js";
-import { createArena } from "./sim/arena.js";
+import { World } from "@dogfight/shared/sim/world.js";
+import { createArena } from "@dogfight/shared/sim/arena.js";
 import { setupCanvas, applyCamera } from "./render/canvas.js";
 import { createStarfield, drawBackground, drawWorld, drawHud } from "./render/draw.js";
 import { drawLoading } from "./render/loading.js";
@@ -28,6 +29,9 @@ import { Lobby } from "./lobby/lobby.js";
 import { createLobbyView } from "./lobby/lobby-view.js";
 import { createRoomView } from "./lobby/room-view.js";
 import { Connection, socketUrl } from "./net/connection.js";
+import { NetGame } from "./net/netgame.js";
+import { TICK_DT } from "@dogfight/shared/protocol/messages.js";
+import { PLAYER_COLORS as SLOT_COLORS } from "@dogfight/shared/sim/arenas.js";
 import { PROTOCOL_VERSION } from "./net/protocol.js";
 
 const STEP = 1 / 60;
@@ -204,6 +208,26 @@ function showLobby(notice) {
 // ---- room: one WebSocket per visit (Lab 4) -----------------------------------------------------
 let connection = null;
 let roomView = null;
+let net = null; // Lab 5: the networked game for the current room visit
+let netAcc = 0; // accumulator: the page loop steps at 1/60 s, the network game at 1/30 s
+let netFirePressed = false;
+let showNetgraph = true;
+let lagPreset = 0;
+const LAG_PRESETS = [
+  { lag: 0, jitter: 0, drop: 0 },
+  { lag: 100, jitter: 30, drop: 0.02 },
+  { lag: 200, jitter: 50, drop: 0.05 },
+];
+
+/** ws URL with the Lab 5 experiment parameters passed through (?codec=json&lag=100…). */
+function gameSocketUrl() {
+  const params = new URLSearchParams();
+  if (flags.codec === "json") params.set("codec", "json");
+  for (const key of ["lag", "jitter", "drop"])
+    if (flags.netsim[key]) params.set(key, flags.netsim[key]);
+  const query = params.toString();
+  return socketUrl() + (query ? `?${query}` : "");
+}
 
 const REFUSED = {
   4004: "Сервер не пустив у кімнату: її немає або вона повна.",
@@ -216,11 +240,35 @@ function enterRoom(selectedRoom, name) {
   room = selectedRoom;
   pilotName = name;
   roomView ??= createRoomView(roomEl, {
-    onPlay: () => startGame(room, pilotName),
+    onPlay: () => startNetGame(),
     onLeave: leaveRoom,
   });
   connection?.close();
-  connection = new Connection(socketUrl());
+  net?.dispose();
+  net = null;
+  connection = new Connection(gameSocketUrl());
+  let roster = [];
+  // Every (re)join gets a welcome with our slot: a fresh NetGame for that slot.
+  connection.on("welcome", (msg) => {
+    net?.dispose();
+    net = new NetGame({
+      conn: connection,
+      arena: lobbyArena,
+      slot: msg.slot,
+      codec: msg.codec,
+      interpDelayMs: flags.interpDelay,
+      bus,
+      flags: { predict: flags.predict, breakDeterminism: flags.breakDeterminism },
+    });
+    net.setNames(roster);
+    console.info(
+      `[net] slot ${msg.slot}, codec ${msg.codec}, netsim ${JSON.stringify(msg.netsim)}`,
+    );
+  });
+  connection.on("roster", (msg) => {
+    roster = msg.players;
+    net?.setNames(roster);
+  });
   // "open" fires on the first connect AND after every reconnect: (re)join each time.
   connection.on("open", () =>
     connection.send({ type: "join", v: PROTOCOL_VERSION, room: room.id, name: pilotName }),
@@ -244,7 +292,20 @@ function leaveRoom() {
   connection?.send({ type: "leave" });
   connection?.close();
   connection = null;
+  net?.dispose();
+  net = null;
   showLobby();
+}
+
+/** Lab 5: "Грати" in a room = the server's game; this page only sends inputs and draws. */
+function startNetGame() {
+  if (!net) return; // not welcomed yet
+  roomView?.hide();
+  screen = "game";
+  world = null;
+  hud.clear();
+  SLOT_COLORS.forEach((color, i) => hud.setPlayerColor(i + 1, color));
+  document.getElementById("game").focus();
 }
 
 // ---- game -------------------------------------------------------------------------------------
@@ -283,13 +344,32 @@ function startGame(selectedRoom, name) {
 }
 
 // ---- UI keys: event callbacks, NOT simulation input --------------------------------------------
-input.onPress("KeyP", () => screen === "game" && (paused = !paused));
+const typing = (e) => e.target?.tagName === "INPUT";
+input.onPress("KeyP", () => screen === "game" && !net && (paused = !paused));
+// Lab 5 netcode keys (in a network game): N netgraph · [ ] interpolation delay · L latency
+// presets · O prediction on/off · K break determinism (the M2 experiment)
+const inNetGame = () => screen === "game" && net;
+input.onPress("KeyN", (e) => !typing(e) && (showNetgraph = !showNetgraph));
+input.onPress(
+  "BracketLeft",
+  () => inNetGame() && (net.interpDelayMs = Math.max(0, net.interpDelayMs - 17)),
+);
+input.onPress(
+  "BracketRight",
+  () => inNetGame() && (net.interpDelayMs = Math.min(500, net.interpDelayMs + 17)),
+);
+input.onPress("KeyO", () => inNetGame() && (net.predict = !net.predict));
+input.onPress("KeyK", () => inNetGame() && (net.breakDeterminism = !net.breakDeterminism));
+input.onPress("KeyL", () => {
+  if (!inNetGame()) return;
+  lagPreset = (lagPreset + 1) % LAG_PRESETS.length;
+  connection.send({ type: "netsim", ...LAG_PRESETS[lagPreset] });
+});
 input.onPress("KeyR", () => {
-  if (screen !== "game") return;
+  if (screen !== "game" || net) return;
   world = createWorld();
   probe.result = null;
 });
-const typing = (e) => e.target?.tagName === "INPUT";
 input.onPress("KeyH", (e) => !typing(e) && (showHelp = !showHelp));
 input.onPress("KeyM", (e) => !typing(e) && sound?.toggleMute());
 input.onPress("Escape", () => {
@@ -308,7 +388,32 @@ const AUTOPILOT = Object.freeze({
 });
 const probe = { result: null };
 
+/** Either keyboard layout steers the ONE local ship of a network game. */
+function netControls() {
+  const a = readControls(input, BINDINGS[1]);
+  const b = readControls(input, BINDINGS[2]);
+  return {
+    thrust: a.thrust || b.thrust,
+    left: a.left || b.left,
+    right: a.right || b.right,
+    fire: a.fire || b.fire,
+    firePressed: a.firePressed || b.firePressed,
+  };
+}
+
 function simulate(dt) {
+  if (screen === "game" && net) {
+    const controls = netControls();
+    netFirePressed ||= controls.firePressed; // a click between two 1/30 s steps is not lost
+    netAcc += dt;
+    while (netAcc >= TICK_DT - 1e-9) {
+      net.step({ ...controls, firePressed: netFirePressed });
+      netFirePressed = false;
+      netAcc -= TICK_DT;
+    }
+    input.endStep();
+    return;
+  }
   if (screen !== "game" || paused) {
     input.endStep();
     return;
@@ -351,6 +456,8 @@ function render(alpha, stats) {
     drawBackground(ctx, view, lobbyArena, stars);
     return;
   }
+
+  if (net && !world) return renderNet(time);
 
   drawBackground(ctx, view, world.arena, stars);
   ctx.save();
@@ -405,6 +512,73 @@ function render(alpha, stats) {
   drawHud(ctx, lines);
 }
 
+function renderNet(time) {
+  drawBackground(ctx, view, lobbyArena, stars);
+  ctx.save();
+  applyCamera(ctx, view);
+  ctx.beginPath();
+  ctx.rect(0, 0, lobbyArena.width, lobbyArena.height);
+  ctx.clip();
+  drawWorld(ctx, net.view(netAcc / TICK_DT), 1, time, TICK_DT, assets.sprites);
+  hud.drawFloaters(ctx);
+  ctx.restore();
+
+  const lines = [];
+  if (showNetgraph) lines.push(...net.netgraph().map((text) => ({ text, color: "#9fe8ff" })));
+  lines.push({
+    text: `room     ${room.name} · ${arenas[room.arena]?.name ?? room.arena} · сервер рахує гру, 30 тіків/с`,
+    color: "#9fb0d8",
+  });
+  for (const [slot, p] of net.players) {
+    const status = p.respawn > 0 ? `respawn ${p.respawn.toFixed(1)}s` : "";
+    lines.push({
+      text: `${net.nameOf(slot).padEnd(10)} score ${String(p.score).padStart(5)}   ${status}${slot === net.slot ? "  (ви)" : ""}`,
+      color: SLOT_COLORS[(slot - 1) % SLOT_COLORS.length],
+    });
+  }
+  if (!net.alive) lines.push({ text: "Ваш корабель знищено — респаун за 2 с", color: "#ffd479" });
+  if (showHelp) {
+    lines.push(
+      {
+        text: "W/↑ тяга · A/D ←/→ поворот · Space/Enter вогонь · Esc кімната · H сховати",
+        color: "#9fb0d8",
+      },
+      {
+        text: "N netgraph · [ ] затримка інтерполяції · L затримка мережі · O передбачення · K зламати детермінізм",
+        color: "#9fb0d8",
+      },
+    );
+  }
+  lines.push(...hud.feedLines());
+  drawHud(ctx, lines);
+  if (showNetgraph) drawCorrectionGraph(net.corrections);
+}
+
+/** Netgraph sparkline: reconciliation correction per snapshot, last 5 s (top right). */
+function drawCorrectionGraph(values) {
+  const w = 240;
+  const h = 70;
+  const x = view.width - w - 12;
+  const y = view.height - h - 30; // bottom right: the HUD text owns the top
+  const max = Math.max(5, ...values);
+  ctx.fillStyle = "rgba(5, 8, 16, 0.75)";
+  ctx.fillRect(x, y, w, h + 18);
+  ctx.strokeStyle = "#9fe8ff";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const px = x + (i / 149) * w;
+    const py = y + 16 + h - (v / max) * (h - 4);
+    if (i) ctx.lineTo(px, py);
+    else ctx.moveTo(px, py);
+  });
+  ctx.stroke();
+  ctx.fillStyle = "#9fb0d8";
+  ctx.font = "11px ui-monospace, Consolas, monospace";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(`correction, 5 s · max ${max.toFixed(1)}`, x + 6, y + 12);
+}
+
 const loop = createLoop({
   step: STEP,
   simulate,
@@ -436,6 +610,9 @@ window.__dogfight = {
   lobby,
   get connection() {
     return connection;
+  },
+  get net() {
+    return net;
   },
   bus,
   probe,

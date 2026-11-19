@@ -1,0 +1,15 @@
+{
+  "name": "@dogfight/shared",
+  "private": true,
+  "version": "0.5.0",
+  "type": "module",
+  "description": "Code that runs in BOTH the browser and Node: the deterministic simulation, the protocol and the codecs. No DOM, no Node built-ins.",
+  "exports": {
+    "./sim/*": "./sim/*",
+    "./protocol/*": "./protocol/*",
+    "./codec/*": "./codec/*"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

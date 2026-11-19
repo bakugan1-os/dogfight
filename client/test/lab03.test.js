@@ -10,11 +10,11 @@ import { parseFault, createFaultFetch } from "../src/net/faults.js";
 import { loadAll, planItems } from "../src/assets/loader.js";
 import { Lobby, validateRooms } from "../src/lobby/lobby.js";
 import { validateArenas } from "../src/arenas.js";
-import { World } from "../src/sim/world.js";
-import { Asteroid } from "../src/sim/asteroid.js";
-import { Bullet } from "../src/sim/bullet.js";
-import { Vector2 } from "../src/sim/vector.js";
-import { NO_CONTROLS } from "../src/sim/ship.js";
+import { World } from "@dogfight/shared/sim/world.js";
+import { Asteroid } from "@dogfight/shared/sim/asteroid.js";
+import { Bullet } from "@dogfight/shared/sim/bullet.js";
+import { Vector2 } from "@dogfight/shared/sim/vector.js";
+import { NO_CONTROLS } from "@dogfight/shared/sim/ship.js";
 import { PUZZLES, runPuzzle } from "../src/puzzles/puzzles.js";
 
 /** A fake fetch: answers by URL after `delay` ms, and honours the abort signal like the real one. */
@@ -403,12 +403,12 @@ test("World dispatches fired / hit / exploded / scored on its event bus", () => 
 });
 
 test("the simulation never imports audio or HUD code", () => {
-  const dir = new URL("../src/sim/", import.meta.url);
+  const dir = new URL("../../shared/sim/", import.meta.url);
   for (const file of readdirSync(dir)) {
     const source = readFileSync(new URL(file, dir), "utf8");
     const imports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
     for (const path of imports) {
-      assert.ok(path.startsWith("./"), `${file} imports ${path} — outside src/sim`);
+      assert.ok(path.startsWith("./"), `${file} imports ${path} — outside shared/sim`);
     }
   }
 });

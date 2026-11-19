@@ -24,6 +24,9 @@ const SPEC = {
   SLOW_CLIENT_BYTES: { type: "int", default: 64 * 1024, min: 1024, max: 64 * 1024 * 1024 },
   DROP_CLIENT_BYTES: { type: "int", default: 1024 * 1024, min: 1024, max: 1024 * 1024 * 1024 },
   DEBUG_ROUTES: { type: "bool", default: false }, // /api/slow and friends: never in production
+  NETSIM: { type: "bool", default: false }, // Lab 5 latency injector (?lag=&jitter=&drop=)
+  INPUT_RATE_PER_SEC: { type: "int", default: 45, min: 1, max: 1000 }, // real-time inputs (30/s)
+  INPUT_RATE_BURST: { type: "int", default: 60, min: 1, max: 10_000 },
   QUIET: { type: "bool", default: false },
 };
 

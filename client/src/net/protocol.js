@@ -1,5 +1,4 @@
-// The client's half of protocol v1 (see server/src/protocol.js for the full description).
-// Duplicated on purpose for now — a test checks that both sides agree; Lab 5 moves the
-// protocol into a shared/ package used by both.
+// The client's half of the control protocol (see server/src/protocol.js for the full description).
+// The real-time part (input/snapshot layouts, tick rate) lives in shared/protocol since Lab 5.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2; // v2 (Lab 5): binary input/snapshot frames, player slots

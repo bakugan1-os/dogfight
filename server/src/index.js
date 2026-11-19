@@ -29,7 +29,13 @@ export async function createGameServer(config, { log = console.log } = {}) {
     rssMB: Math.round((process.memoryUsage().rss / 2 ** 20) * 10) / 10,
   });
 
-  const handle = createRequestHandler({ config, rooms, stats, log: say });
+  const handle = createRequestHandler({
+    config,
+    rooms,
+    stats,
+    matchStats: () => sockets?.matchStats() ?? [],
+    log: say,
+  });
   const server = createServer((req, res) => {
     handle(req, res);
   });

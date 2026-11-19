@@ -122,10 +122,17 @@ function busyWait(ms) {
  * @param {object} deps  { config, rooms, stats(), log }
  * @returns {(req, res) => void}  the "request" listener for http.createServer
  */
-export function createRequestHandler({ config, rooms, stats = () => ({}), log = () => {} }) {
+export function createRequestHandler({
+  config,
+  rooms,
+  stats = () => ({}),
+  matchStats = () => [],
+  log = () => {},
+}) {
   const routes = [
     ["GET", /^\/health$/, () => ({ status: "ok", ...stats() })],
     ["GET", /^\/api\/rooms$/, () => ({ rooms: rooms.list() })],
+    ["GET", /^\/api\/stats$/, () => ({ ...stats(), matches: matchStats() })],
     [
       "POST",
       /^\/api\/rooms$/,

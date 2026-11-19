@@ -3,17 +3,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { Vector2 } from "../src/sim/vector.js";
-import { Entity } from "../src/sim/entity.js";
-import { Ship, NO_CONTROLS, SHIP_PARAMS } from "../src/sim/ship.js";
-import { Bullet, BULLET_TTL } from "../src/sim/bullet.js";
-import { Asteroid } from "../src/sim/asteroid.js";
-import { Pickup } from "../src/sim/pickup.js";
-import { Explosion } from "../src/sim/explosion.js";
-import { World } from "../src/sim/world.js";
-import { findCollisionsNaive } from "../src/sim/collision.js";
-import { homing } from "../src/sim/behaviors.js";
-import { createRng } from "../src/sim/rng.js";
+import { Vector2 } from "@dogfight/shared/sim/vector.js";
+import { Entity } from "@dogfight/shared/sim/entity.js";
+import { Ship, NO_CONTROLS, SHIP_PARAMS } from "@dogfight/shared/sim/ship.js";
+import { Bullet, BULLET_TTL } from "@dogfight/shared/sim/bullet.js";
+import { Asteroid } from "@dogfight/shared/sim/asteroid.js";
+import { Pickup } from "@dogfight/shared/sim/pickup.js";
+import { Explosion } from "@dogfight/shared/sim/explosion.js";
+import { World } from "@dogfight/shared/sim/world.js";
+import { findCollisionsNaive } from "@dogfight/shared/sim/collision.js";
+import { homing } from "@dogfight/shared/sim/behaviors.js";
+import { createRng } from "@dogfight/shared/sim/rng.js";
 
 const STEP = 1 / 60;
 const emptyWorld = (options = {}) => new World({ asteroids: 0, pickupEvery: 1e9, ...options });

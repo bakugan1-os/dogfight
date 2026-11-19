@@ -35,6 +35,8 @@ export class Connection extends EventTarget {
     this.#WebSocket = WebSocketImpl;
     Object.assign(this, { baseMs, maxMs, maxQueue, random, setTimer, clearTimer });
     this.state = "idle";
+    this.bytesIn = 0; // Lab 5: counters for the netgraph (bytes/s = difference per second)
+    this.bytesOut = 0;
   }
 
   /** Subscribe to one message type (or "status"/"open"); returns an unsubscribe function. */
@@ -67,6 +69,7 @@ export class Connection extends EventTarget {
   #connect() {
     this.#status(this.#attempt ? "reconnecting" : "connecting", { attempt: this.#attempt });
     const socket = new this.#WebSocket(this.#url);
+    socket.binaryType = "arraybuffer"; // Lab 5: snapshots arrive as ArrayBuffer, not Blob
     this.#socket = socket;
     socket.onopen = () => {
       this.#attempt = 0;
@@ -76,13 +79,23 @@ export class Connection extends EventTarget {
       for (const text of pending) socket.send(text);
     };
     socket.onmessage = (e) => {
+      if (typeof e.data !== "string") {
+        this.bytesIn += e.data.byteLength;
+        this.#emit("binary", e.data); // real-time frames: decoded by the game, not here
+        return;
+      }
+      this.bytesIn += e.data.length; // ASCII-ish JSON: close enough for the netgraph
       let msg;
       try {
         msg = JSON.parse(e.data);
       } catch {
         return; // the server only sends JSON; ignore anything else
       }
-      if (msg && typeof msg.type === "string") this.#emit(msg.type, msg);
+      if (msg && typeof msg.type === "string") {
+        // A JSON-codec snapshot is real-time traffic too: hand it over raw, like a binary one.
+        if (msg.type === "snapshot") this.#emit("realtime", e.data);
+        else this.#emit(msg.type, msg);
+      }
     };
     socket.onerror = () => {}; // a "close" always follows; that's where we decide
     socket.onclose = (e) => {
@@ -104,11 +117,23 @@ export class Connection extends EventTarget {
     };
   }
 
+  /**
+   * Real-time frame (an encoded input): sent only if open, never queued — a stale input is
+   * worse than none, the next one is 33 ms away. Returns false if it was not sent.
+   */
+  sendFrame(frame) {
+    if (this.#socket?.readyState !== 1) return false;
+    this.#socket.send(frame);
+    this.bytesOut += typeof frame === "string" ? frame.length : frame.byteLength;
+    return true;
+  }
+
   /** Sends now if open, otherwise queues (oldest dropped beyond maxQueue). */
   send(message) {
     const text = JSON.stringify(message);
     if (this.#socket?.readyState === 1 /* OPEN */) {
       this.#socket.send(text);
+      this.bytesOut += text.length;
       return true;
     }
     this.#queue.push(text);

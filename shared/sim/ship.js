@@ -139,6 +139,9 @@ export class Ship extends Entity {
       ownerId: this.playerId,
       damage: SHIP_PARAMS.bulletDamage,
     });
+    // Lab 5: the input that fired it. The client predicted a bullet for that seq and replaces
+    // it with this one when the snapshot arrives.
+    bullet.seq = this.controls.seq ?? 0;
     if (this.effects.has("homing")) {
       bullet.with(
         homing({

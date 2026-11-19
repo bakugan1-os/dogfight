@@ -71,9 +71,27 @@ export class World {
   }
 
   spawn(entity) {
+    // Lab 5: a small per-world id for the wire (u16), reused after wrap-around. Entity.id (the
+    // process-wide counter from Lab 2) would overflow 16 bits on a long-running server.
+    if (entity.netId == null) entity.netId = this.#allocNetId();
     if (this.#stepping) this.#pending.push(entity);
     else this.#entities.set(entity.id, entity);
     return entity;
+  }
+
+  #nextNetId = 1;
+  #netIds = new Set();
+
+  #allocNetId() {
+    for (let tries = 0; tries < 0xffff; tries++) {
+      const id = this.#nextNetId;
+      this.#nextNetId = id === 0xffff ? 1 : id + 1;
+      if (!this.#netIds.has(id)) {
+        this.#netIds.add(id);
+        return id;
+      }
+    }
+    throw new Error("out of network ids");
   }
 
   /** Deferred: marks dead now, removed by the sweep at the end of the step. */
@@ -88,6 +106,15 @@ export class World {
     this.players.set(id, player);
     this.#spawnShip(player);
     return player;
+  }
+
+  /** Lab 5: a player left the match — their ship disappears without an explosion or score. */
+  removePlayer(id) {
+    const player = this.players.get(id);
+    if (!player) return false;
+    if (player.shipId != null) this.get(player.shipId)?.kill();
+    this.players.delete(id);
+    return true;
   }
 
   nameOf(playerId) {
@@ -133,6 +160,7 @@ export class World {
     this.notify("exploded", {
       kind: "ship",
       playerId: ship.playerId,
+      killerId: killerId ?? 0,
       x: ship.pos.x,
       y: ship.pos.y,
     });
@@ -193,7 +221,10 @@ export class World {
     // Collect first, delete second: no mutation of the Map while its iterator is live.
     const dead = [];
     for (const [id, e] of this.#entities) if (!e.alive) dead.push(id);
-    for (const id of dead) this.#entities.delete(id);
+    for (const id of dead) {
+      this.#netIds.delete(this.#entities.get(id).netId);
+      this.#entities.delete(id);
+    }
   }
 
   #flush() {

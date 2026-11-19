@@ -8,6 +8,7 @@ export class Bullet extends Entity {
     super({ kind: "bullet", pos, vel, angle, radius: 3 });
     this.ownerId = ownerId;
     this.damage = damage;
+    this.seq = 0; // Lab 5: input seq that fired it (0 = not from an input)
     this.with(timeToLive(BULLET_TTL));
   }
 }

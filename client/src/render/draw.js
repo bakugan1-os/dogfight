@@ -1,8 +1,8 @@
 // Drawing only. Reads state, never changes it.
 
-import { SHIP_PARAMS } from "../sim/ship.js";
-import { wrapCoord, wrappedDelta } from "../sim/arena.js";
-import { lerpAngle } from "../sim/math.js";
+import { SHIP_PARAMS } from "@dogfight/shared/sim/ship.js";
+import { wrapCoord, wrappedDelta } from "@dogfight/shared/sim/arena.js";
+import { lerpAngle } from "@dogfight/shared/sim/math.js";
 
 /** Deterministic star positions (tiny LCG), generated once — the background must not flicker. */
 export function createStarfield(arena, count = 160, seed = 12345) {

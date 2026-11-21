@@ -1,7 +1,7 @@
 {
   "name": "dogfight",
   "private": true,
-  "version": "0.6.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Top-down 2D arena game built step by step for the JavaScript course (labs 1-8).",
   "engines": {

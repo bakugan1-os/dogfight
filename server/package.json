@@ -1,7 +1,7 @@
 {
   "name": "@dogfight/server",
   "private": true,
-  "version": "0.6.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Game server: node:http + WebSocket rooms, chat, match logs as streams.",
   "main": "src/index.ts",

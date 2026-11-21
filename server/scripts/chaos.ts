@@ -295,6 +295,7 @@ try {
     logged: {
       wsClose: newLogs.filter((l) => l.event === "ws.close").length,
       wsRejected: newLogs.filter((l) => l.event === "ws.rejected").length,
+      wsError: newLogs.filter((l) => l.event === "ws.error").length,
     },
     roomA: during,
   };

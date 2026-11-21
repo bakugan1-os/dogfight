@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/await-thenable --
+   the puzzles are ABOUT un-awaited promises and `await null`: that is what they demonstrate. */
 // Lab 3, M4: five task/microtask ordering puzzles. Each one takes a `log` function, schedules
 // its work, and resolves when everything it scheduled has run. `expected` is the answer;
 // test/lab03.test.ts checks the answers in Node, puzzles.html shows them in the browser.

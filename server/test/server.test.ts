@@ -1,7 +1,7 @@
 // Lab 4: config, protocol, rooms, HTTP API + static guard, WebSocket lifecycle, abuse limits,
 // match logs, replay streaming, graceful shutdown. Real servers on random ports, real sockets.
 
-import { test, after } from "node:test";
+import { test, afterAll } from "vitest";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ import { NdjsonEncoder } from "../src/log/matchlog.ts";
 import { readReplay } from "../src/log/replay.ts";
 import { startServer, client, joined, cleanupTmp, tmpDir } from "./helpers.ts";
 
-after(cleanupTmp);
+afterAll(cleanupTmp);
 
 function rawGet(port: number, path: string): Promise<number | undefined> {
   return new Promise((resolve, reject) => {
@@ -142,9 +142,11 @@ test("TokenBucket: allows a burst, then refills at the set rate", () => {
 
 // ---- HTTP -----------------------------------------------------------------------------------
 
-test("HTTP: health, rooms API (GET/POST with validation and size cap), 404/405", async (t) => {
+test("HTTP: health, rooms API (GET/POST with validation and size cap), 404/405", async ({
+  onTestFinished,
+}) => {
   const { game, base } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const health = z
     .object({ status: z.literal("ok"), rssMB: z.number() })
     .parse(await (await fetch(`${base}/health`)).json());
@@ -168,9 +170,11 @@ test("HTTP: health, rooms API (GET/POST with validation and size cap), 404/405",
   assert.equal((await fetch(`${base}/api/rooms`, { method: "DELETE" })).status, 405);
 });
 
-test("static: serves the client, blocks path traversal (raw and %-encoded)", async (t) => {
+test("static: serves the client, blocks path traversal (raw and %-encoded)", async ({
+  onTestFinished,
+}) => {
   const { game, base, port } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const index = await fetch(`${base}/`);
   assert.equal(index.status, 200);
   assert.match(index.headers.get("content-type") ?? "", /text\/html/);
@@ -183,9 +187,11 @@ test("static: serves the client, blocks path traversal (raw and %-encoded)", asy
 
 // ---- WebSocket ------------------------------------------------------------------------------
 
-test("ws: two players join one room, see the roster and each other's chat", async (t) => {
+test("ws: two players join one room, see the roster and each other's chat", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const a = await joined(ws, "r-104", "Ada");
   await a.next("roster");
   const b = await joined(ws, "r-104", "Bob");
@@ -206,16 +212,18 @@ test("ws: two players join one room, see the roster and each other's chat", asyn
   a.ws.close();
 });
 
-test("ws: no join within the timeout -> closed with 4003", async (t) => {
+test("ws: no join within the timeout -> closed with 4003", async ({ onTestFinished }) => {
   const { game, ws } = await startServer({ JOIN_TIMEOUT_MS: "100" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(ws);
   assert.equal((await c.closed).code, CLOSE.JOIN_TIMEOUT);
 });
 
-test("ws: unknown type, chat before join, full room -> specific close codes", async (t) => {
+test("ws: unknown type, chat before join, full room -> specific close codes", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c1 = client(ws);
   await c1.opened;
   c1.send({ type: "teleport" });
@@ -234,26 +242,28 @@ test("ws: unknown type, chat before join, full room -> specific close codes", as
   solo.ws.close();
 });
 
-test("ws: a frame over maxPayload -> 1009 (closed by ws itself)", async (t) => {
+test("ws: a frame over maxPayload -> 1009 (closed by ws itself)", async ({ onTestFinished }) => {
   const { game, ws } = await startServer({ MAX_PAYLOAD_BYTES: "1024" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(ws);
   await c.opened;
   c.send("x".repeat(2048));
   assert.equal((await c.closed).code, CLOSE.TOO_BIG);
 });
 
-test("ws: flooding beyond the token bucket -> 4008", async (t) => {
+test("ws: flooding beyond the token bucket -> 4008", async ({ onTestFinished }) => {
   const { game, ws } = await startServer({ RATE_LIMIT_PER_SEC: "5", RATE_LIMIT_BURST: "5" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = await joined(ws, "r-104", "Spammer");
   for (let i = 0; i < 20; i++) c.send({ type: "chat", text: `spam ${i}` });
   assert.equal((await c.closed).code, CLOSE.RATE_LIMIT);
 });
 
-test("ws: a client that never answers pings is terminated after two misses", async (t) => {
+test("ws: a client that never answers pings is terminated after two misses", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer({ HEARTBEAT_MS: "60" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(ws, { autoPong: false }); // simulates a dead peer behind a NAT
   await c.opened;
   c.send({ type: "join", v: PROTOCOL_VERSION, room: "r-104", name: "Ghost" });
@@ -264,21 +274,23 @@ test("ws: a client that never answers pings is terminated after two misses", asy
   assert.equal(game.sockets.counters.terminated, 1);
 });
 
-test("ws: an answering client survives many heartbeats", async (t) => {
+test("ws: an answering client survives many heartbeats", async ({ onTestFinished }) => {
   const { game, ws } = await startServer({ HEARTBEAT_MS: "50" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = await joined(ws, "r-104", "Alive");
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(c.ws.readyState, WebSocket.OPEN);
   c.ws.close();
 });
 
-test("ws: slow-client policy — chat is dropped over the soft limit, the socket cut over the hard one", async (t) => {
+test("ws: slow-client policy — chat is dropped over the soft limit, the socket cut over the hard one", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer({
     SLOW_CLIENT_BYTES: "10000",
     DROP_CLIENT_BYTES: "50000",
   });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const slow = await joined(ws, "r-104", "Slow");
   await slow.next("roster");
   const [serverSide] = game.sockets.wss.clients; // the server's end of Slow's connection
@@ -314,9 +326,11 @@ test("NdjsonEncoder: objects in, one JSON line each out", async () => {
   assert.equal(chunks.join(""), '{"a":1}\n{"b":"привіт"}\n');
 });
 
-test("match log: a session becomes an NDJSON file; replay reads it back; endpoint streams it", async (t) => {
+test("match log: a session becomes an NDJSON file; replay reads it back; endpoint streams it", async ({
+  onTestFinished,
+}) => {
   const { game, ws, base, config } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const a = await joined(ws, "r-101", "Ada");
   const b = await joined(ws, "r-101", "Bob");
   a.send({ type: "chat", text: "gg" });
@@ -374,7 +388,8 @@ test("the server process exits with code 0 on SIGTERM", async () => {
   child.stdout.on("data", (d: Buffer) => (output += String(d)));
   while (!output.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 20));
   child.kill("SIGTERM");
-  const [code] = await once(child, "exit");
+  const exit: unknown[] = await once(child, "exit"); // once() resolves with the event's args
+  const [code] = exit;
   assert.equal(code, 0);
   assert.match(output, /SIGTERM: shutting down/);
 });

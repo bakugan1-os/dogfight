@@ -1,7 +1,7 @@
 // Lab 4 (client side): the Connection wrapper — dispatch by type, send queue while connecting,
 // reconnect with backoff, no reconnect after a deliberate or "you did it wrong" close.
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   Connection,

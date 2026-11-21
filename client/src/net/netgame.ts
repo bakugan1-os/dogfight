@@ -26,10 +26,11 @@ import { binaryCodec } from "@dogfight/shared/codec/binary.ts";
 import { jsonCodec } from "@dogfight/shared/codec/json.ts";
 import { CodecError, type CodecName } from "@dogfight/shared/codec/codec.ts";
 import {
-  bodyFromSnapshot,
   cloneBody,
   predictStep,
   bulletFrom,
+  reconcile,
+  type PendingInput,
   type PredictedBody,
 } from "@dogfight/shared/sim/predict.ts";
 import { BULLET_TTL } from "@dogfight/shared/sim/bullet.ts";
@@ -89,7 +90,6 @@ const CLIENT_CODECS: Record<CodecName, ClientCodec> = {
   },
 };
 
-type Pending = { seq: Seq; controls: Controls };
 type LocalBullet = {
   seq: Seq;
   pos: Vector2;
@@ -124,7 +124,7 @@ export type NetGameOptions = {
 export class NetGame {
   readonly #codec: ClientCodec;
   #seq = 0;
-  #pending: Pending[] = []; // sent but not yet acknowledged
+  #pending: PendingInput[] = []; // sent but not yet acknowledged
   #body: PredictedBody | null = null; // predicted own ship (current step)
   #prevBody: PredictedBody | null = null; // previous step, for render interpolation inside a step
   readonly #offset = { x: 0, y: 0 }; // visual smoothing of corrections
@@ -324,20 +324,23 @@ export class NetGame {
     }
     this.#ownInfo = own;
     if (!this.predict) return; // M1: own ship is drawn straight from snapshots
-    const before = this.#body ? this.#body.pos.clone() : null;
-    const body = bodyFromSnapshot(own, Boolean(own.flags & SHIP_FLAG.rapid));
-    for (const p of this.#pending) this.#predict(body, p.controls); // replay the unacknowledged
-    if (before) {
-      const dx = wrappedDelta(body.pos.x, before.x, this.arena.width);
-      const dy = wrappedDelta(body.pos.y, before.y, this.arena.height);
-      const error = Math.hypot(dx, dy);
+    const { body, correction } = reconcile(
+      own,
+      this.#pending,
+      snap.ack,
+      this.arena,
+      this.#body ? this.#body.pos : null,
+      (b, controls) => this.#predict(b, controls),
+    );
+    if (correction) {
+      const error = correction.distance;
       this.stats.correction = error;
       this.corrections.push(error);
       if (this.corrections.length > 150) this.corrections.shift(); // last 5 s for the graph
       this.stats.correctionAvg = lerp(this.stats.correctionAvg, error, 0.1);
       if (error < TELEPORT) {
-        this.#offset.x += dx; // draw where we WERE, then glide to where we ARE
-        this.#offset.y += dy;
+        this.#offset.x += correction.dx; // draw where we WERE, then glide to where we ARE
+        this.#offset.y += correction.dy;
       } else {
         this.#offset.x = this.#offset.y = 0;
       }

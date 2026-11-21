@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "vitest run --root .. --project client",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {

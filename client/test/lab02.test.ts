@@ -1,6 +1,6 @@
 // Lab 2: Vector2 purity, the entity model, the Map-based world, collisions, composition, `this`.
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import { Vector2 } from "@dogfight/shared/sim/vector.ts";

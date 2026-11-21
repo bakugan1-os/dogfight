@@ -10,7 +10,7 @@
     "./codec/*": "./codec/*"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "vitest run --root .. --project shared",
     "typecheck": "tsc -p ."
   },
   "dependencies": {

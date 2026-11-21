@@ -1,7 +1,7 @@
 // Lab 1: the simulation is DOM-free, deterministic, and independent of the display's frame rate.
 // Run with: npm test
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import { createAccumulator } from "../src/loop.ts";

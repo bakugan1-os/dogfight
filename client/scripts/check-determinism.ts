@@ -22,7 +22,9 @@ const SHARED = fileURLToPath(new URL("../../shared/", import.meta.url));
 
 /** Runs in BOTH places (stringified into the page). FNV-1a over every entity's numbers. */
 async function simulate(base: string, noise: boolean): Promise<string> {
-  // A computed URL: TypeScript cannot see the module, so we tell it which one it is.
+  // A computed URL: TypeScript cannot see the module, so we tell it which one it is. The import
+  // itself is `any` — the one place the type-checked lint rules are switched off, on purpose.
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment */
   const sim: WorldModule = await import(`${base}sim/world.ts`);
   const ship: ShipModule = await import(`${base}sim/ship.ts`);
   const ids: IdsModule = await import(`${base}protocol/ids.ts`);
@@ -60,6 +62,7 @@ await page.goto("http://localhost:5173/puzzles.html");
 await page.waitForLoadState("networkidle");
 const chrome = await page.evaluate(
   async ({ src, base }) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- a function rebuilt from its source text in the page
     const fn: typeof simulate = new Function(`return (${src})`)();
     return [await fn(base, false), await fn(base, true)];
   },

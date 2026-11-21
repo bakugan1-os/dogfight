@@ -45,9 +45,9 @@ for (const mode of ["stream", "naive"]) {
       if (!body) return 0;
       const reader = body.getReader();
       for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return window.__got;
-        window.__got += value.length;
+        const chunk: { done: boolean; value?: unknown } = await reader.read();
+        if (chunk.done) return window.__got;
+        if (chunk.value instanceof Uint8Array) window.__got += chunk.value.length;
       }
     },
     `${base}/api/replays/${id}${mode === "naive" ? "?naive=1" : ""}`,

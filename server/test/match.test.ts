@@ -1,7 +1,7 @@
 // Lab 5: the authoritative match, the precise tick loop, binary inputs over a real socket,
 // and the latency injector.
 
-import { test } from "node:test";
+import { test, afterAll } from "vitest";
 import assert from "node:assert/strict";
 import { Match } from "../src/match.ts";
 import { TickLoop } from "../src/tickloop.ts";
@@ -14,7 +14,7 @@ import type { Input } from "@dogfight/shared/protocol/messages.ts";
 import { seq as toSeq, tick } from "@dogfight/shared/protocol/ids.ts";
 import { startServer, client, until, cleanupTmp } from "./helpers.ts";
 
-test.after(cleanupTmp);
+afterAll(cleanupTmp);
 
 const input = (seq: number, extra: Partial<Input> = {}): Input => ({
   seq: toSeq(seq),
@@ -113,9 +113,11 @@ test("netsim link: delays by ~lag/2, keeps order, drops only droppable frames", 
   assert.equal(link.stats.dropped, 1);
 });
 
-test("over a real socket: binary inputs in, binary snapshots out, ack advances", async (t) => {
+test("over a real socket: binary inputs in, binary snapshots out, ack advances", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(ws);
   await c.opened;
   c.send({ type: "join", v: PROTOCOL_VERSION, room: "r-104", name: "Ada" });
@@ -132,9 +134,11 @@ test("over a real socket: binary inputs in, binary snapshots out, ack advances",
   c.ws.close();
 });
 
-test("over a real socket: a malformed binary input closes the socket with 4002", async (t) => {
+test("over a real socket: a malformed binary input closes the socket with 4002", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer();
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(ws);
   await c.opened;
   c.send({ type: "join", v: PROTOCOL_VERSION, room: "r-104", name: "Eve" });
@@ -145,9 +149,11 @@ test("over a real socket: a malformed binary input closes the socket with 4002",
   assert.equal((await c.closed).code, CLOSE.BAD_SHAPE);
 });
 
-test("latency injector via ?lag: ping/pong RTT grows by about the lag", async (t) => {
+test("latency injector via ?lag: ping/pong RTT grows by about the lag", async ({
+  onTestFinished,
+}) => {
   const { game, ws } = await startServer({ NETSIM: "true" });
-  t.after(() => game.stop());
+  onTestFinished(() => game.stop());
   const c = client(`${ws}?lag=120`);
   await c.opened;
   const t0 = performance.now();

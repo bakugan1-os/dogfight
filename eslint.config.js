@@ -7,9 +7,44 @@ import tseslint from "typescript-eslint";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["**/dist/", "**/node_modules/", "server/logs/"] },
+  {
+    ignores: [
+      "**/dist/",
+      "**/node_modules/",
+      "server/logs/",
+      "coverage/",
+      "test-results/",
+      "playwright-report/",
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.recommended,
+  {
+    // Lab 7: TYPE-CHECKED rules. ESLint asks the TypeScript compiler (projectService finds each
+    // file's tsconfig) whether an expression is a Promise, an `any`, … — things syntax alone
+    // cannot know.
+    files: ["**/*.ts"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
+      "@typescript-eslint/require-await": "error",
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
+      "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    },
+  },
+  {
+    // test doubles are often `async () => { throw … }` on purpose: a rejecting promise
+    files: ["**/test/**/*.ts", "e2e/**/*.ts"],
+    rules: { "@typescript-eslint/require-await": "off" },
+  },
   {
     files: ["client/src/**/*.ts"],
     languageOptions: { globals: globals.browser },

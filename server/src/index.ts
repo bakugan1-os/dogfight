@@ -10,7 +10,7 @@ import { createRequestHandler } from "./http.ts";
 import { attachWebSockets, type Sockets } from "./ws.ts";
 import { createMatchLogger, type MatchLogger } from "./log/matchlog.ts";
 import { loadConfig, ConfigError, type ServerConfig } from "./config.ts";
-import { errorCode } from "./errors.ts";
+import { errorCode, errorMessage } from "./errors.ts";
 
 export type ServerStats = {
   uptimeS: number;
@@ -60,7 +60,12 @@ export async function createGameServer(
     log: say,
   });
   const server = createServer((req, res) => {
-    handle(req, res);
+    // Lab 7 (no-floating-promises): handle() catches its own errors, but if its catch block
+    // itself threw, this promise would reject with nobody listening -> the process would die.
+    handle(req, res).catch((error: unknown) => {
+      say(`request handler crashed: ${errorMessage(error)}`);
+      res.destroy();
+    });
   });
   server.on("clientError", (error, socket) => socket.destroy(error)); // malformed HTTP
   const ws = attachWebSockets(server, { config, rooms, log: say });
@@ -152,9 +157,22 @@ async function main(): Promise<void> {
     await game.stop();
     process.exitCode = 0; // let the event loop drain and exit by itself
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // An async function passed where Node expects a plain callback: its promise is dropped, so a
+  // failing game.stop() would become an unhandled rejection (no-misused-promises). Catch it here.
+  const onSignal = (signal: NodeJS.Signals) => {
+    shutdown(signal).catch((error: unknown) => {
+      console.error(`shutdown failed: ${errorMessage(error)}`);
+      process.exit(1);
+    });
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 }
 
 // Run only when started directly (`node src/index.ts`), not when imported by the tests.
-if (import.meta.filename === process.argv[1]) void main();
+if (import.meta.filename === process.argv[1]) {
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

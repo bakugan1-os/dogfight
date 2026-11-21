@@ -1,7 +1,7 @@
 // Lab 3: fetch helpers, retry/backoff, concurrent loading with progress and cancellation,
 // the lobby's polling + abort-on-leave, the event bus, and the ordering puzzles.
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 

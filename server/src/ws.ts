@@ -35,6 +35,7 @@ import type { CodecName } from "@dogfight/shared/codec/codec.ts";
 import { assertNever } from "@dogfight/shared/sim/math.ts";
 import { tick as toTick, type PlayerId } from "@dogfight/shared/protocol/ids.ts";
 import { TokenBucket } from "./ratelimit.ts";
+import { startHeartbeat, type HeartbeatClient } from "./heartbeat.ts";
 import { Match, type MatchStats } from "./match.ts";
 import { createLink, parseNetsim, NO_NETSIM, type Link } from "./netsim.ts";
 import type { Member, Room, RoomManager } from "./rooms.ts";
@@ -373,21 +374,28 @@ export function attachWebSockets(
   }
 
   // ---- heartbeat ---------------------------------------------------------------------------------
-  const heartbeat = setInterval(() => {
+  function* heartbeatClients(): Generator<HeartbeatClient> {
     for (const ws of wss.clients) {
       const s = state.get(ws);
       if (!s) continue;
-      if (s.missedPongs >= 2) {
-        log(`[${s.id}] terminated: missed 2 pongs`);
-        counters.terminated++;
-        ws.terminate(); // no close handshake: the peer is not listening anyway
-        continue;
-      }
-      s.missedPongs++;
-      ws.ping();
+      yield {
+        get missedPongs() {
+          return s.missedPongs;
+        },
+        set missedPongs(n) {
+          s.missedPongs = n;
+        },
+        ping: () => ws.ping(),
+        terminate: () => {
+          log(`[${s.id}] terminated: missed 2 pongs`);
+          ws.terminate();
+        },
+      };
     }
-  }, config.heartbeatMs);
-  heartbeat.unref();
+  }
+  const stopHeartbeat = startHeartbeat(config.heartbeatMs, heartbeatClients, (n) => {
+    counters.terminated += n;
+  });
 
   return {
     wss,
@@ -398,7 +406,7 @@ export function attachWebSockets(
     },
     /** Graceful: close every socket with 1001, wait up to `graceMs`, then terminate the rest. */
     async shutdown(graceMs = 2000) {
-      clearInterval(heartbeat);
+      stopHeartbeat();
       for (const match of matches.values()) match.stop();
       const closed = [...wss.clients].map(
         (ws) =>

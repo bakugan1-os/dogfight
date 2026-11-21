@@ -91,7 +91,8 @@ const Join = z.strictObject({
 });
 const Chat = z.strictObject({ type: z.literal("chat"), text: text(LIMITS.text) });
 const Leave = z.strictObject({ type: z.literal("leave") });
-const Ping = z.strictObject({ type: z.literal("ping"), t: z.number().min(0) });
+/** `t` is the client's performance.now(), echoed back; 1e12 ms ≈ 31 years of page uptime. */
+const Ping = z.strictObject({ type: z.literal("ping"), t: z.number().min(0).max(1e12) });
 const InputJson = z.strictObject({
   type: z.literal("input"),
   seq: z.number().int().positive(),

@@ -65,7 +65,7 @@ const fetchImpl = flags.staticHost ? createFaultFetch() : globalThis.fetch.bind(
 // ---- long-lived modules ----------------------------------------------------------------------
 const bus = new Bus<WorldEvents>(); // survives restarts: listeners attach once
 const audioCtx = createAudioContext(); // created now (suspended), decoded into while loading
-unlockOnGesture(audioCtx); // the first click / key press anywhere resumes it
+void unlockOnGesture(audioCtx); // the first click / key press anywhere resumes it (never rejects)
 const hud = createHud(bus);
 const input = createInput(window);
 const lobbyArena = createArena();

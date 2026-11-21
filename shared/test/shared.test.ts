@@ -1,7 +1,7 @@
 // Lab 5: the shared package — pure, deterministic, and its codecs round-trip.
 // Lab 6: typed; the determinism hash is pinned to the value the JavaScript version produced.
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";

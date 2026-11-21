@@ -112,7 +112,7 @@ test("Map vs object as a dictionary", () => {
   assert.equal(m.get(1), "x");
 });
 
-test("World: Map storage, iterable, ofKind is a lazy generator", () => {
+test("World: Map storage, iterable, ofKind is a per-kind index (Lab 7; was a generator)", () => {
   const world = emptyWorld();
   world.addPlayer({ id: P1 });
   world.spawn(Asteroid.random(world.rng, new Vector2(100, 100)));
@@ -121,9 +121,9 @@ test("World: Map storage, iterable, ofKind is a lazy generator", () => {
     [...world].map((e) => e.kind),
     ["ship", "asteroid"],
   );
-  const gen = world.ofKind("asteroid");
-  assert.equal(typeof gen.next, "function");
-  assert.equal([...gen].length, 1);
+  const rocks = world.ofKind("asteroid");
+  assert.equal(rocks.size, 1);
+  assert.equal([...world.ofKind("ship")][0]?.kind, "ship");
 });
 
 test("World: despawn is deferred to the sweep at the end of the step", () => {

@@ -15,10 +15,10 @@ import { Ship, NO_CONTROLS, type Controls } from "./ship.ts";
 import { Asteroid, type AsteroidSize } from "./asteroid.ts";
 import { Pickup, PICKUP_TYPE_LIST, type PickupType } from "./pickup.ts";
 import { Explosion } from "./explosion.ts";
-import { findCollisionsNaive } from "./collision.ts";
+import { findCollisionsHashed } from "./spatialhash.ts";
 import { resolveCollision } from "./rules.ts";
 import { Bus } from "./bus.ts";
-import { isKind, type AnyEntity, type EntityKind, type OfKind } from "./kinds.ts";
+import { type AnyEntity, type EntityKind, type OfKind } from "./kinds.ts";
 import { isEntityId, type EntityId, type PlayerId } from "../protocol/ids.ts";
 
 /** Everything the world announces, by name. The bus checks payloads against this map. */
@@ -75,6 +75,13 @@ export class World implements Iterable<AnyEntity> {
   #pickupTimer = 3;
   #nextNetId = 1;
   readonly #netIds = new Set<EntityId>();
+  readonly #byKind: { readonly [K in EntityKind]: Set<OfKind<K>> } = {
+    ship: new Set(),
+    bullet: new Set(),
+    asteroid: new Set(),
+    pickup: new Set(),
+    explosion: new Set(),
+  };
 
   readonly config: WorldConfig;
   readonly arena: Arena;
@@ -92,7 +99,8 @@ export class World implements Iterable<AnyEntity> {
     this.config = { ...WORLD_DEFAULTS, ...config };
     this.arena = arena ?? createArena();
     this.rng = createRng(this.config.seed);
-    this.findCollisions = findCollisions ?? findCollisionsNaive; // swappable system
+    // swappable system; Lab 7: the grid is the default (identical output, see spatialhash.ts)
+    this.findCollisions = findCollisions ?? findCollisionsHashed;
     this.events = events ?? new Bus<WorldEvents>();
     for (let i = 0; i < this.config.asteroids; i++) this.#spawnAsteroid();
     this.#flush();
@@ -105,13 +113,29 @@ export class World implements Iterable<AnyEntity> {
   }
 
   /** `for (const e of world)` — iterates entities in insertion order. */
-  *[Symbol.iterator](): Generator<AnyEntity> {
-    yield* this.#entities.values();
+  [Symbol.iterator](): MapIterator<AnyEntity> {
+    // Lab 7: was a generator (`yield*`) — 15 % of the server's CPU at 128 players. A Map's own
+    // iterator does the same thing without a generator object and its resume machinery.
+    return this.#entities.values();
   }
 
-  /** Lazy filter: no intermediate array. `for (const b of world.ofKind("bullet"))` — b: Bullet. */
-  *ofKind<K extends EntityKind>(kind: K): Generator<OfKind<K>> {
-    for (const e of this) if (isKind(e, kind)) yield e;
+  /** The live set of one kind. `for (const b of world.ofKind("bullet"))` — b: Bullet. */
+  ofKind<K extends EntityKind>(kind: K): ReadonlySet<OfKind<K>> {
+    // Lab 7: was a generator filtering ALL entities for every call (12 % of the server's CPU:
+    // every bot and homing bullet asks for the ships each tick). Now each kind keeps its own
+    // Set, updated where #entities is; insertion order is the same, so results are identical.
+    return this.#byKind[kind];
+  }
+
+  #index(e: AnyEntity): void {
+    this.#entities.set(e.id, e);
+    this.#kindSet(e).add(e);
+  }
+
+  /** The Set for this entity's kind. (A type guard per kind: TS cannot correlate e.kind and the key.) */
+  #kindSet(e: AnyEntity): Set<AnyEntity> {
+    const sets: Record<EntityKind, Set<AnyEntity>> = this.#byKind;
+    return sets[e.kind];
   }
 
   get(id: number): AnyEntity | undefined {
@@ -123,7 +147,7 @@ export class World implements Iterable<AnyEntity> {
     // process-wide counter from Lab 2) would overflow 16 bits on a long-running server.
     entity.netId ??= this.#allocNetId();
     if (this.#stepping) this.#pending.push(entity);
-    else this.#entities.set(entity.id, entity);
+    else this.#index(entity);
     return entity;
   }
 
@@ -280,6 +304,7 @@ export class World implements Iterable<AnyEntity> {
     for (const e of dead) {
       if (e.netId != null) this.#netIds.delete(e.netId);
       this.#entities.delete(e.id);
+      this.#kindSet(e).delete(e);
     }
   }
 
@@ -287,7 +312,7 @@ export class World implements Iterable<AnyEntity> {
     for (const e of this.#pending) {
       wrapPosition(this.arena, e.pos);
       e.savePrevious(); // a new entity has no "previous" state: don't interpolate from (0,0)
-      this.#entities.set(e.id, e);
+      this.#index(e);
     }
     this.#pending.length = 0;
   }
@@ -300,7 +325,7 @@ export class World implements Iterable<AnyEntity> {
     this.#pickupTimer -= dt;
     if (this.#pickupTimer <= 0) {
       this.#pickupTimer = this.config.pickupEvery;
-      if ([...this.ofKind("pickup")].length < this.config.maxPickups) {
+      if (this.ofKind("pickup").size < this.config.maxPickups) {
         const type = this.rng.pick(PICKUP_TYPE_LIST);
         this.spawn(new Pickup({ pos: this.findSafeSpot(90), type }));
       }
@@ -337,13 +362,13 @@ export class World implements Iterable<AnyEntity> {
         this.rng.range(0, this.arena.width),
         this.rng.range(0, this.arena.height),
       );
-      let nearest = Infinity;
-      for (const e of [...this, ...this.#pending]) {
-        if (!e.alive || !e.collides) continue;
-        const dx = wrappedDelta(candidate.x, e.pos.x, this.arena.width);
-        const dy = wrappedDelta(candidate.y, e.pos.y, this.arena.height);
-        nearest = Math.min(nearest, Math.hypot(dx, dy) - e.radius);
-      }
+      // Lab 7: was `[...this, ...this.#pending]` (a new array per try) and always a full scan —
+      // 20 % of the server's CPU with 128 players respawning. Now: two plain loops, and a try
+      // stops as soon as it cannot beat the best one so far (same result, fewer distance checks).
+      const nearest = Math.min(
+        this.#clearanceAt(candidate, this.#entities.values(), bestScore),
+        this.#clearanceAt(candidate, this.#pending, bestScore),
+      );
       if (nearest >= clearance) return candidate;
       if (nearest > bestScore) {
         best = candidate;
@@ -351,6 +376,19 @@ export class World implements Iterable<AnyEntity> {
       }
     }
     return best;
+  }
+
+  /** Distance from `p` to the nearest collidable body's edge; stops early at or below `floor`. */
+  #clearanceAt(p: Vector2, bodies: Iterable<AnyEntity>, floor: number): number {
+    let nearest = Infinity;
+    for (const e of bodies) {
+      if (!e.alive || !e.collides) continue;
+      const dx = wrappedDelta(p.x, e.pos.x, this.arena.width);
+      const dy = wrappedDelta(p.y, e.pos.y, this.arena.height);
+      nearest = Math.min(nearest, Math.hypot(dx, dy) - e.radius);
+      if (nearest <= floor) return nearest;
+    }
+    return nearest;
   }
 
   /** Id-free summary of the state, for determinism tests (ids come from a global counter). */

@@ -55,6 +55,7 @@ export type MatchStats = TickStats & {
   tick: number;
   entities: number;
   jitter: { meanMs: number; p95Ms: number };
+  tickMs: { p50: number; p99: number; max: number; n: number };
   bytesOut: number;
   bytesIn: number;
 };
@@ -185,7 +186,10 @@ export class Match {
 
   #broadcast(snap: Snapshot): void {
     let bin: Uint8Array<ArrayBuffer> | null = null; // encoded once per tick; only the 4-byte ack differs
-    for (const c of this.#clients.values()) {
+    for (const [sessionId, c] of this.#clients) {
+      // Lab 7: bots read the world directly. Encoding + copying a snapshot for each of them was
+      // 4 % of the server's CPU at 128 bots — for frames that were thrown away.
+      if (this.#bots.has(sessionId)) continue;
       let frame: Uint8Array | string;
       if (c.sink.codec === "json") {
         frame = jsonCodec.encodeSnapshot({ ...snap, ack: c.lastProcessed });
@@ -208,6 +212,7 @@ export class Match {
       entities: this.world.size,
       ...this.loop.stats,
       jitter: this.loop.jitter(),
+      tickMs: this.loop.durations(),
       bytesOut: this.bytesOut,
       bytesIn: this.bytesIn,
     };

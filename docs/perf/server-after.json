@@ -1,0 +1,66 @@
+{
+  "label": "after",
+  "bots": 32,
+  "seconds": 60,
+  "entities": 67,
+  "tickMs": {
+    "p50": 0.40536200000497047,
+    "p99": 1.038047000001825,
+    "max": 3.254971000000296
+  },
+  "elu": 0.782,
+  "rssMB": 140,
+  "busyMs": 645.524,
+  "selfTime": [
+    {
+      "fn": "processTimers node:internal/timers:506",
+      "ms": 73.065,
+      "pct": 11.318711620327052
+    },
+    {
+      "fn": "(garbage collector) :0",
+      "ms": 66.348,
+      "pct": 10.27816161753862
+    },
+    {
+      "fn": "next server/src/bot.ts:36",
+      "ms": 33.298,
+      "pct": 5.158290009356739
+    },
+    {
+      "fn": "listOnTimeout node:internal/timers:526",
+      "ms": 25.273,
+      "pct": 3.915113922952516
+    },
+    {
+      "fn": "pushAsyncContext node:internal/async_hooks:547",
+      "ms": 17.461,
+      "pct": 2.704934285944442
+    },
+    {
+      "fn": "compileSourceTextModule node:internal/modules/esm/utils:344",
+      "ms": 17.212,
+      "pct": 2.6663609718616192
+    },
+    {
+      "fn": "__require node:internal/deps/amaro/dist/index:8",
+      "ms": 17.069,
+      "pct": 2.6442084260228897
+    },
+    {
+      "fn": "compileForInternalLoader node:internal/bootstrap/realm:385",
+      "ms": 14.362,
+      "pct": 2.2248591841666614
+    },
+    {
+      "fn": "(anonymous) server/src/tickloop.ts:51",
+      "ms": 13.847,
+      "pct": 2.145079036565643
+    },
+    {
+      "fn": "step server/src/match.ts:166",
+      "ms": 11.758,
+      "pct": 1.8214659718306367
+    }
+  ]
+}

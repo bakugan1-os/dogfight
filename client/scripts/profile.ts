@@ -45,16 +45,14 @@ const post = async (path: string, body: object): Promise<unknown> =>
   ).json();
 
 async function session(page: Page): Promise<void> {
-  const created = z
-    .object({ room: z.object({ id: z.string() }) })
-    .parse(
-      await post("/api/rooms", {
-        name: `Profile ${label}`,
-        arena: "belt",
-        mode: "duel",
-        maxPlayers: 9,
-      }),
-    );
+  const created = z.object({ room: z.object({ id: z.string() }) }).parse(
+    await post("/api/rooms", {
+      name: `Profile ${label}`,
+      arena: "belt",
+      mode: "duel",
+      maxPlayers: 9,
+    }),
+  );
   const room = created.room.id;
   await page.goto(`${base}/?join=${room}&autopilot=1&perf=${process.env.PERF ?? "1"}&name=Prof`);
   await page.waitForFunction(

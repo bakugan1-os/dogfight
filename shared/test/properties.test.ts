@@ -19,6 +19,9 @@ import { entityId, playerId, seq, tick } from "../protocol/ids.ts";
 import { PROTOCOL_VERSION, parseClientMessage, type ClientMessage } from "../protocol/control.ts";
 import { World } from "../sim/world.ts";
 import { NO_CONTROLS } from "../sim/ship.ts";
+import { findCollisionsNaive } from "../sim/collision.ts";
+import { createSpatialHash } from "../sim/spatialhash.ts";
+import { createArena } from "../sim/arena.ts";
 
 // ---- arbitraries: generators of valid protocol values ------------------------------------------
 
@@ -285,5 +288,26 @@ test("property: …and rejects every mutation of one (extra field, wrong type, o
       expect(parseClientMessage(JSON.stringify(m)).ok).toBe(false);
     }),
     { numRuns: 500 },
+  );
+});
+
+// ---- 6. the spatial hash finds exactly what the naive pass finds (Lab 7, M3) -----------------
+
+test("property: spatial hash = naive all-pairs — same pairs, same order, wrap-around included", () => {
+  const arena = createArena(1600, 900);
+  const hashed = createSpatialHash(100);
+  const body = fc.record({
+    x: fc.double({ min: 0, max: 1599.999, noNaN: true }),
+    y: fc.double({ min: 0, max: 899.999, noNaN: true }),
+    radius: fc.constantFrom(3, 14, 20, 40),
+    alive: fc.integer({ min: 0, max: 9 }).map((n) => n > 0),
+    collides: fc.integer({ min: 0, max: 9 }).map((n) => n > 0),
+  });
+  fc.assert(
+    fc.property(fc.array(body, { maxLength: 300 }), (raw) => {
+      const bodies = raw.map((b) => ({ ...b, pos: { x: b.x, y: b.y } }));
+      expect(hashed(bodies, arena)).toEqual(findCollisionsNaive(bodies, arena));
+    }),
+    { numRuns: 300 },
   );
 });

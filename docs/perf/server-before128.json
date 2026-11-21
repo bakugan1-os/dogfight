@@ -1,0 +1,66 @@
+{
+  "label": "before128",
+  "bots": 128,
+  "seconds": 30,
+  "entities": 159,
+  "tickMs": {
+    "p50": 3.275561999999809,
+    "p99": 9.611525000000029,
+    "max": 15.315636999999924
+  },
+  "elu": 0.762,
+  "rssMB": 148.5,
+  "busyMs": 3603.889,
+  "selfTime": [
+    {
+      "fn": "(anonymous) shared/sim/world.ts:108",
+      "ms": 527.329,
+      "pct": 14.63222091468411
+    },
+    {
+      "fn": "ofKind shared/sim/world.ts:113",
+      "ms": 450.123,
+      "pct": 12.489924079237735
+    },
+    {
+      "fn": "findSafeSpot shared/sim/world.ts:332",
+      "ms": 393.721,
+      "pct": 10.924892525824186
+    },
+    {
+      "fn": "next server/src/bot.ts:36",
+      "ms": 350.132,
+      "pct": 9.715393565118127
+    },
+    {
+      "fn": "(garbage collector) :0",
+      "ms": 267.749,
+      "pct": 7.429446356422187
+    },
+    {
+      "fn": "findCollisionsNaive shared/sim/collision.ts:22",
+      "ms": 196.227,
+      "pct": 5.444868030064189
+    },
+    {
+      "fn": "step server/src/match.ts:166",
+      "ms": 176.273,
+      "pct": 4.891188380108266
+    },
+    {
+      "fn": "withAck shared/codec/binary.ts:178",
+      "ms": 142.352,
+      "pct": 3.9499551734251526
+    },
+    {
+      "fn": "step shared/sim/world.ts:237",
+      "ms": 129.975,
+      "pct": 3.606520622582993
+    },
+    {
+      "fn": "toward server/src/bot.ts:51",
+      "ms": 88.316,
+      "pct": 2.4505749205927265
+    }
+  ]
+}

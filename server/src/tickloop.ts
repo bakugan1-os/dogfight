@@ -15,6 +15,8 @@ export class TickLoop {
   #lastStart = 0;
   readonly #jitters = new Float64Array(300); // ring buffer of |actual interval − period|, ms
   #jitterCount = 0;
+  readonly #durations = new Float64Array(1800); // Lab 7: last 60 s of tick durations, ms
+  #durationCount = 0;
 
   readonly hz: number;
   readonly period: number;
@@ -59,6 +61,7 @@ export class TickLoop {
     this.#lastStart = start;
     this.onTick();
     const took = this.now() - start;
+    this.#durations[this.#durationCount++ % this.#durations.length] = took;
     const s = this.stats;
     s.ticks++;
     s.avgTickMs += (took - s.avgTickMs) * 0.05;
@@ -69,6 +72,15 @@ export class TickLoop {
       this.#next = this.now(); // hopelessly behind: skip ahead rather than burst-fire
     }
     if (this.#timer) this.#schedule();
+  }
+
+  /** Lab 7: p50/p99/max of the tick duration over the last 1800 ticks (60 s), in ms. */
+  durations(): { p50: number; p99: number; max: number; n: number } {
+    const n = Math.min(this.#durationCount, this.#durations.length);
+    if (!n) return { p50: 0, p99: 0, max: 0, n };
+    const sorted = Array.from(this.#durations.subarray(0, n)).sort((a, b) => a - b);
+    const q = (p: number) => sorted[Math.min(n - 1, Math.floor(n * p))] ?? 0;
+    return { p50: q(0.5), p99: q(0.99), max: sorted[n - 1] ?? 0, n };
   }
 
   /** Mean and p95 of |interval − period| over the last 300 ticks, in ms. */

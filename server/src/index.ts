@@ -18,6 +18,7 @@ export type ServerStats = {
   connections: number;
   openLogs: number;
   rssMB: number;
+  elu: number;
 };
 
 export type GameServer = {
@@ -44,12 +45,22 @@ export async function createGameServer(
 
   const startedAt = Date.now();
   let sockets: Sockets | null = null;
+  // Lab 7: event-loop utilization over the last second (0 = idle, 1 = never idle).
+  let eluPrev = performance.eventLoopUtilization();
+  let elu = 0;
+  const eluTimer = setInterval(() => {
+    const now = performance.eventLoopUtilization();
+    elu = performance.eventLoopUtilization(now, eluPrev).utilization;
+    eluPrev = now;
+  }, 1000);
+  eluTimer.unref();
   const stats = (): ServerStats => ({
     uptimeS: Math.round((Date.now() - startedAt) / 1000),
     rooms: rooms.size,
     connections: sockets?.connections ?? 0,
     openLogs: matchLogs.open,
     rssMB: Math.round((process.memoryUsage().rss / 2 ** 20) * 10) / 10,
+    elu: Math.round(elu * 1000) / 1000,
   });
 
   const handle = createRequestHandler({

@@ -16,6 +16,7 @@ import {
 } from "@dogfight/shared/protocol/control.ts";
 import { byId } from "./dom.ts";
 import * as perf from "./perf.ts";
+import { CLIENT_VERSION, fetchServerVersion } from "./version.ts";
 import type { HudLine } from "./render/draw.ts";
 import type { LoadingState } from "./render/loading.ts";
 import type { Sound } from "./audio.ts";
@@ -307,11 +308,35 @@ function enterRoom(selectedRoom: RoomSummary, name: string): void {
   connection?.close();
   net?.dispose();
   net = null;
-  const conn = new Connection(gameSocketUrl());
+  serverVersion ??= "…";
+  fetchServerVersion()
+    .then((v) => (serverVersion = v ?? "?"))
+    .catch(() => {});
+  // Lab 8: ~1 min of backoff (0.5, 1, 2, 4, 8, 8… s, full jitter), then back to the lobby.
+  const conn = new Connection(gameSocketUrl(), { maxAttempts: 10 });
   connection = conn;
   let roster: ReadonlyArray<{ name: string; slot?: PlayerId | undefined }> = [];
+  let boot: string | undefined; // the server process we joined (welcome.boot)
+  const backToLobby = (notice: string) => {
+    if (connection !== conn) return;
+    conn.close();
+    connection = null;
+    net?.dispose();
+    net = null;
+    showLobby(notice);
+  };
+  // Lab 8: a deploy/restart. The server says so before closing (1001): don't hammer it with
+  // reconnects into a match that no longer exists — the lobby polls (with backoff) until it's back.
+  conn.on("shutdown", () =>
+    backToLobby("Сервер перезапускається (оновлення). За кілька секунд кімнати з'являться знову."),
+  );
   // Every (re)join gets a welcome with our slot: a fresh NetGame for that slot.
   conn.on("welcome", (msg) => {
+    // Reconnected to a DIFFERENT server process (it crashed and restarted): the match we were
+    // in is gone, scores included. Say so instead of silently dropping the player into a new one.
+    if (boot !== undefined && msg.boot !== undefined && msg.boot !== boot)
+      return backToLobby("Сервер перезапустився — матч скинуто. Оберіть кімнату ще раз.");
+    boot = msg.boot;
     net?.dispose();
     net = new NetGame({
       conn,
@@ -336,10 +361,12 @@ function enterRoom(selectedRoom: RoomSummary, name: string): void {
   conn.on("open", () =>
     conn.send({ type: "join", v: PROTOCOL_VERSION, room: selectedRoom.id, name: pilotName }),
   );
-  conn.on("status", ({ state, code }) => {
+  conn.on("status", ({ state, code, reason }) => {
     console.info(`[ws] ${state}${code ? ` (${code})` : ""}`);
     const refused = code === undefined ? undefined : REFUSED[code];
     if (state === "closed" && refused) showLobby(refused);
+    else if (state === "closed" && reason === "gave up")
+      backToLobby("Сервер не відповідає. Спробуйте пізніше — лобі оновиться саме.");
   });
   roomView.bind(conn, selectedRoom, arenas[selectedRoom.arena]?.name);
   conn.open();
@@ -615,6 +642,7 @@ function renderFrame(alpha: number, stats: LoopStats): void {
       { text: "P1: W тяга, A/D поворот, Space вогонь", color: "#9fb0d8" },
       { text: "P2: ↑ тяга, ←/→ поворот, Enter вогонь", color: "#9fb0d8" },
       { text: "P пауза · R рестарт · M звук · Esc назад · H сховати", color: "#9fb0d8" },
+      { text: `version ${CLIENT_VERSION}`, color: "#6f7fa8" },
     );
   }
   if (paused) lines.push({ text: "ПАУЗА", color: "#ffd479" });
@@ -647,6 +675,8 @@ function renderNet(net: NetGame, time: number): void {
   if (showNetgraph) drawCorrectionGraph(net.corrections);
 }
 
+let serverVersion: string | null = null; // Lab 8: from /health, shown in the netgraph
+
 const netHud: { lines: HudLine[]; width: number; builtAt: number } = {
   lines: [],
   width: 0,
@@ -663,6 +693,11 @@ function buildNetHud(net: NetGame, now: number): void {
       color: "#9fb0d8",
     });
   }
+  if (showNetgraph)
+    lines.push({
+      text: `version  client ${CLIENT_VERSION} · server ${serverVersion ?? "?"}`,
+      color: "#6f7fa8",
+    });
   for (const [slot, p] of net.players) {
     const status = p.respawn > 0 ? `respawn ${p.respawn.toFixed(1)}s` : "";
     lines.push({

@@ -376,20 +376,66 @@ test("graceful shutdown: sockets get 1001, open match logs are flushed to disk",
   assert.match(text, /"type":"leave".*"reason":"server shutdown"/); // the file is complete
 });
 
-test("the server process exits with code 0 on SIGTERM", async () => {
+/** Lab 8: the real process (`node src/index.ts`), its JSON log lines collected. */
+async function spawnServer(env: Record<string, string> = {}) {
   const { spawn } = await import("node:child_process");
   const dir = await tmpDir("dogfight-proc-");
   const child = spawn(process.execPath, ["src/index.ts"], {
     cwd: join(import.meta.dirname, ".."),
-    env: { ...process.env, PORT: "0", LOG_DIR: dir, QUIET: "true" },
+    env: { ...process.env, PORT: "0", LOG_DIR: dir, QUIET: "false", LOG_LEVEL: "info", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = "";
-  child.stdout.on("data", (d: Buffer) => (output += String(d)));
-  while (!output.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 20));
-  child.kill("SIGTERM");
-  const exit: unknown[] = await once(child, "exit"); // once() resolves with the event's args
+  const lines: Record<string, unknown>[] = [];
+  let buffered = "";
+  child.stdout.on("data", (d: Buffer) => {
+    buffered += String(d);
+    const parts = buffered.split("\n");
+    buffered = parts.pop() ?? "";
+    for (const line of parts) lines.push(z.record(z.string(), z.unknown()).parse(JSON.parse(line)));
+  });
+  const find = (event: string) => lines.find((l) => l.event === event);
+  const until = async (event: string) => {
+    while (!find(event)) await new Promise((r) => setTimeout(r, 20));
+    return find(event) ?? {};
+  };
+  const listening = await until("server.listening");
+  const url = z.string().parse(listening.url);
+  return { child, lines, find, until, base: url, ws: `${url.replace("http", "ws")}/ws` };
+}
+
+test("SIGTERM: clients get a shutdown message + 1001, the process exits 0 in < 10 s", async () => {
+  const proc = await spawnServer();
+  const ada = await joined(proc.ws, "r-101", "Ada");
+  assert.equal((await fetch(`${proc.base}/ready`)).status, 200);
+
+  const t0 = performance.now();
+  proc.child.kill("SIGTERM");
+  const shutdown = await ada.next("shutdown");
+  assert.ok(shutdown.reason.length > 0);
+  assert.equal((await ada.closed).code, 1001);
+  const exit: unknown[] = await once(proc.child, "exit");
   const [code] = exit;
+  const ms = performance.now() - t0;
   assert.equal(code, 0);
-  assert.match(output, /SIGTERM: shutting down/);
+  assert.ok(ms < 10_000, `exit took ${ms} ms`);
+  assert.ok(proc.find("server.shutdown"), "logged the signal");
+  assert.ok(proc.find("server.exit"), "logged the exit");
+  // structured: the join was logged as an event with both ids
+  const joinedLine = proc.find("player.joined");
+  assert.equal(joinedLine?.roomId, "r-101");
+  assert.equal(typeof joinedLine?.playerId, "string");
+});
+
+test("crash on unknowns: an uncaught exception is logged with its stack and exits 1", async () => {
+  const proc = await spawnServer({ DEBUG_ROUTES: "true" });
+  const res = await fetch(`${proc.base}/api/crash`, { method: "POST" });
+  assert.equal(res.status, 200);
+  const exit: unknown[] = await once(proc.child, "exit");
+  const [code] = exit;
+  assert.equal(code, 1);
+  const crash = await proc.until("process.crash");
+  assert.equal(crash.level, 60); // pino "fatal"
+  const err = z.object({ message: z.string(), stack: z.string() }).parse(crash.err);
+  assert.match(err.message, /deliberate crash/);
+  assert.match(err.stack, /http\.ts/);
 });

@@ -73,6 +73,8 @@ export type ConnectionOptions = {
   baseMs?: number;
   maxMs?: number;
   maxQueue?: number;
+  /** Lab 8: give up (status "closed", reason "gave up") after this many failed reconnects */
+  maxAttempts?: number;
   random?: () => number;
   setTimer?: (fn: () => void, ms: number) => Timer;
   clearTimer?: (t: Timer) => void;
@@ -89,6 +91,7 @@ export class Connection extends Bus<ConnectionEvents> {
   readonly baseMs: number;
   readonly maxMs: number;
   readonly maxQueue: number;
+  readonly maxAttempts: number;
   readonly random: () => number;
   readonly setTimer: (fn: () => void, ms: number) => Timer;
   readonly clearTimer: (t: Timer) => void;
@@ -105,6 +108,7 @@ export class Connection extends Bus<ConnectionEvents> {
       baseMs = 500,
       maxMs = 8000,
       maxQueue = 50,
+      maxAttempts = Infinity,
       random = Math.random,
       setTimer = (fn, ms) => setTimeout(fn, ms),
       clearTimer = (t) => clearTimeout(t),
@@ -116,6 +120,7 @@ export class Connection extends Bus<ConnectionEvents> {
     this.baseMs = baseMs;
     this.maxMs = maxMs;
     this.maxQueue = maxQueue;
+    this.maxAttempts = maxAttempts;
     this.random = random;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -177,6 +182,10 @@ export class Connection extends Bus<ConnectionEvents> {
         this.#status("closed", { code: e.code, reason: e.reason });
         return;
       }
+      if (this.#attempt >= this.maxAttempts) {
+        this.#status("closed", { code: e.code, reason: "gave up" });
+        return;
+      }
       const cap = Math.min(this.maxMs, this.baseMs * 2 ** this.#attempt);
       const delay = Math.round(this.random() * cap);
       this.#attempt++;
@@ -207,6 +216,8 @@ export class Connection extends Bus<ConnectionEvents> {
         return this.emit("system", msg);
       case "error":
         return this.emit("error", msg);
+      case "shutdown":
+        return this.emit("shutdown", msg);
       default:
         return assertNever(msg, "server message");
     }

@@ -24,7 +24,18 @@ export class TickLoop {
   readonly now: () => number;
   readonly stats: TickStats = { ticks: 0, avgTickMs: 0, maxTickMs: 0, overruns: 0 };
 
-  constructor(hz: number, onTick: () => void, { now = () => performance.now() } = {}) {
+  /** Lab 8: called with every tick's duration (ms) — feeds the /metrics histogram. */
+  readonly onDuration: ((ms: number) => void) | undefined;
+
+  constructor(
+    hz: number,
+    onTick: () => void,
+    {
+      now = () => performance.now(),
+      onDuration,
+    }: { now?: () => number; onDuration?: (ms: number) => void } = {},
+  ) {
+    this.onDuration = onDuration;
     this.hz = hz;
     this.period = 1000 / hz;
     this.onTick = onTick;
@@ -62,6 +73,7 @@ export class TickLoop {
     this.onTick();
     const took = this.now() - start;
     this.#durations[this.#durationCount++ % this.#durations.length] = took;
+    this.onDuration?.(took);
     const s = this.stats;
     s.ticks++;
     s.avgTickMs += (took - s.avgTickMs) * 0.05;

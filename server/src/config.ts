@@ -42,6 +42,31 @@ export const EnvSchema = z
     INPUT_RATE_PER_SEC: int(45, 1, 1000), // real-time inputs (30/s)
     INPUT_RATE_BURST: int(60, 1, 10_000),
     QUIET: bool(false),
+    // ---- Lab 8: production -------------------------------------------------------------------
+    LOG_LEVEL: z.preprocess(
+      blank,
+      z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+    ),
+    /** Which build is running: set at `docker build` (--build-arg GIT_SHA=…); shown in /health. */
+    GIT_SHA: z.preprocess(blank, z.string().max(64).default("dev")),
+    /**
+     * Pages allowed to open a WebSocket, comma-separated ("https://dogfight.fly.dev,…").
+     * Empty = only the page served by this server itself (Origin host == Host header). "*" = any.
+     */
+    ALLOWED_ORIGINS: z
+      .preprocess(blank, z.string().default(""))
+      .transform((s) =>
+        s
+          .split(",")
+          .map((o) => o.trim().replace(/\/$/, ""))
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.union([z.literal("*"), z.url({ protocol: /^https?$/ })]))),
+    MAX_CONNECTIONS_PER_IP: int(20, 1, 100_000),
+    /** Behind a proxy (Fly, Render) the socket's address is the PROXY: trust X-Forwarded-For. */
+    TRUST_PROXY: bool(false),
+    /** SIGTERM: how long WebSocket clients get to close before they are cut. */
+    SHUTDOWN_GRACE_MS: int(3000, 0, 8000),
   })
   .refine((c) => c.DROP_CLIENT_BYTES > c.SLOW_CLIENT_BYTES, {
     message: "DROP_CLIENT_BYTES must be larger than SLOW_CLIENT_BYTES",

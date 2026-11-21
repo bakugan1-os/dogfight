@@ -125,6 +125,8 @@ const Welcome = z.object({
   tickRate: z.number().int().positive(),
   codec: z.enum(["binary", "json"]),
   netsim: NetsimSchema,
+  /** Lab 8: id of the server PROCESS. A different one after a reconnect = the server restarted. */
+  boot: z.string().max(64).optional(),
 });
 const Roster = z.object({
   type: z.literal("roster"),
@@ -145,6 +147,13 @@ const ErrorOut = z.object({
   message: z.string(),
 });
 
+/** Lab 8: sent right before close code 1001 — "I am going away (deploy), not you". */
+const Shutdown = z.object({
+  type: z.literal("shutdown"),
+  reason: z.string().max(200),
+  retryMs: z.number().int().min(0).max(60_000),
+});
+
 export const ServerMessageSchema = z.discriminatedUnion("type", [
   Welcome,
   Roster,
@@ -152,6 +161,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   ChatOut,
   System,
   ErrorOut,
+  Shutdown,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 export type ServerMessageType = ServerMessage["type"];

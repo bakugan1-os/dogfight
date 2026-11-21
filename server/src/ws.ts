@@ -13,6 +13,11 @@
 //
 // Lab 6: every incoming text frame goes through parseClientMessage(data: unknown) and comes out
 // as a ClientMessage — a discriminated union; the dispatch below is an exhaustive switch.
+//
+// Lab 8: the handshake checks the Origin header (the WebSocket's CORS) and caps connections per
+// IP; every refusal and every server-side close is counted by reason (-> /metrics). Logs are
+// pino events with playerId/roomId fields. On shutdown each client gets a "shutdown" message
+// and then close code 1001.
 
 import { randomUUID } from "node:crypto";
 import type { Server, IncomingMessage } from "node:http";
@@ -41,7 +46,8 @@ import { createLink, parseNetsim, NO_NETSIM, type Link } from "./netsim.ts";
 import { RoomError, type Member, type Room, type RoomManager } from "./rooms.ts";
 import { Bot } from "./bot.ts";
 import type { ServerConfig } from "./config.ts";
-import { errorMessage, errorStack } from "./errors.ts";
+import { errorMessage } from "./errors.ts";
+import { silentLogger, type Logger } from "./logger.ts";
 
 const MAX_REASON_BYTES = 120; // close reasons must fit in 123 bytes (RFC 6455 §5.5)
 
@@ -56,7 +62,7 @@ export const out = {
     playerId: string,
     slot: PlayerId,
     room: RoomSummary,
-    extra: { tickRate: number; codec: CodecName; netsim: NetsimSettings },
+    extra: { tickRate: number; codec: CodecName; netsim: NetsimSettings; boot?: string },
   ): ServerMessage => ({ type: "welcome", v: PROTOCOL_VERSION, playerId, slot, room, ...extra }),
   roster: (
     room: Room,
@@ -75,7 +81,17 @@ export const out = {
   }),
   system: (text: string, t: number): ServerMessage => ({ type: "system", text, t }),
   error: (code: number, message: string): ServerMessage => ({ type: "error", code, message }),
+  shutdown: (reason: string, retryMs: number): ServerMessage => ({
+    type: "shutdown",
+    reason,
+    retryMs,
+  }),
 };
+
+/** 4008 -> "rate_limit": close codes as metric labels. */
+const CLOSE_NAME: ReadonlyMap<number, string> = new Map(
+  Object.entries(CLOSE).map(([name, code]) => [code, name.toLowerCase()]),
+);
 
 /** Everything the server keeps about one socket. */
 type Session = {
@@ -85,6 +101,8 @@ type Session = {
   readonly bucket: TokenBucket;
   readonly inputBucket: TokenBucket;
   readonly joinTimer: ReturnType<typeof setTimeout>;
+  readonly ip: string;
+  log: Logger;
   name: string | null;
   room: Room | null;
   missedPongs: number;
@@ -94,8 +112,15 @@ type Session = {
 export type SocketCounters = {
   slowDrops: number;
   terminated: number;
+  /** total of `rejections` */
   rejected: number;
   snapshotsSkipped: number;
+  /** Lab 8: refused handshakes and server-side closes, by reason (origin, per_ip, rate_limit…) */
+  rejections: Record<string, number>;
+  messagesIn: number;
+  messagesOut: number;
+  bytesIn: number;
+  bytesOut: number;
 };
 
 export type Sockets = {
@@ -104,6 +129,8 @@ export type Sockets = {
   readonly connections: number;
   matchStats(): MatchStats[];
   addBots(roomId: string, count: number): number;
+  /** players connected from one address (Lab 8 per-IP cap) */
+  perIp(ip: string): number;
   shutdown(graceMs?: number): Promise<void>;
 };
 
@@ -115,8 +142,19 @@ export function attachWebSockets(
   {
     config,
     rooms,
-    log = () => {},
-  }: { config: ServerConfig; rooms: RoomManager; log?: (m: string) => void },
+    log = silentLogger,
+    boot = randomUUID().slice(0, 8),
+    onTick,
+    onMatchEnd,
+  }: {
+    config: ServerConfig;
+    rooms: RoomManager;
+    log?: Logger;
+    /** Lab 8: this process's id, sent in "welcome": a client that sees a new one knows we restarted */
+    boot?: string;
+    onTick?: (roomId: string, ms: number) => void;
+    onMatchEnd?: (roomId: string) => void;
+  },
 ): Sockets {
   const wss = new WebSocketServer({ noServer: true, maxPayload: config.maxPayloadBytes });
   const members = new Map<string, Set<WebSocket>>(); // roomId -> sockets
@@ -126,23 +164,64 @@ export function attachWebSockets(
     terminated: 0,
     rejected: 0,
     snapshotsSkipped: 0,
+    rejections: {},
+    messagesIn: 0,
+    messagesOut: 0,
+    bytesIn: 0,
+    bytesOut: 0,
   };
+  const count = (reason: string) => {
+    counters.rejected++;
+    counters.rejections[reason] = (counters.rejections[reason] ?? 0) + 1;
+  };
+  const connectionsPerIp = new Map<string, number>();
+  let stopping = false;
   const matches = new Map<string, Match>(); // roomId -> Match
   const netsimAllowed = config.netsim || config.debugRoutes;
 
-  wss.on("error", (error) => log(`wss error: ${error.message}`));
+  wss.on("error", (err) => log.error({ event: "wss.error", err }));
+
+  /** Behind a proxy every socket comes from the proxy: the client is in X-Forwarded-For. */
+  function clientIp(req: IncomingMessage): string {
+    const forwarded = req.headers["x-forwarded-for"];
+    const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
+    return (config.trustProxy && first) || req.socket.remoteAddress || "unknown";
+  }
+
+  /**
+   * The WebSocket's "CORS": a browser always sends the page's Origin on the handshake, and any
+   * page on the internet can open `new WebSocket("wss://our.app/ws")` as its visitors. Allowed:
+   * our own page (Origin host == Host), the ALLOWED_ORIGINS list, and no Origin at all — that is
+   * not a browser (load test, curl), and a script can fake any header anyway.
+   */
+  function originAllowed(req: IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (origin === undefined) return true;
+    if (config.allowedOrigins.includes("*") || config.allowedOrigins.includes(origin)) return true;
+    try {
+      return new URL(origin).host === req.headers.host;
+    } catch {
+      return false; // "null" (file://, sandboxed iframe) and garbage
+    }
+  }
 
   // ---- the handshake: HTTP "Upgrade: websocket" on /ws only ------------------------------------
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy()); // a raw socket is an emitter too
     const { pathname } = new URL(req.url ?? "/", "http://localhost");
-    const refuse = (status: number, text: string) => {
-      counters.rejected++;
+    const ip = clientIp(req);
+    const refuse = (status: number, text: string, reason: string) => {
+      count(reason);
+      log.warn({ event: "ws.rejected", reason, ip, origin: req.headers.origin });
       socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
-    if (pathname !== "/ws") return refuse(404, "Not Found");
-    if (wss.clients.size >= config.maxConnections) return refuse(503, "Server Full");
-    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, req));
+    if (pathname !== "/ws") return refuse(404, "Not Found", "not_found");
+    if (stopping) return refuse(503, "Shutting Down", "shutdown");
+    if (!originAllowed(req)) return refuse(403, "Forbidden", "origin");
+    if (wss.clients.size >= config.maxConnections) return refuse(503, "Server Full", "full");
+    if ((connectionsPerIp.get(ip) ?? 0) >= config.maxConnectionsPerIp)
+      return refuse(429, "Too Many Connections", "per_ip");
+    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, req, ip));
   });
 
   // ---- sending, with the slow-client policy -----------------------------------------------------
@@ -151,8 +230,13 @@ export function attachWebSockets(
     const s = state.get(ws);
     if (ws.bufferedAmount > config.dropClientBytes) {
       // The client stopped reading. Its queue lives in OUR memory: cut it off.
-      log(`[${s?.id}] terminated: ${ws.bufferedAmount} bytes queued (slow client)`);
+      (s?.log ?? log).warn({
+        event: "ws.terminated",
+        reason: "slow_client",
+        queued: ws.bufferedAmount,
+      });
       counters.terminated++;
+      count("slow_client");
       ws.terminate();
       return false;
     }
@@ -162,6 +246,8 @@ export function attachWebSockets(
       return false; // a chat line may be lost; the roster never is
     }
     const text = JSON.stringify(message);
+    counters.messagesOut++;
+    counters.bytesOut += text.length; // ASCII-ish JSON: close enough, and no extra pass
     if (s) s.link.out(() => ws.readyState === WebSocket.OPEN && ws.send(text));
     else ws.send(text);
     return true;
@@ -175,6 +261,8 @@ export function attachWebSockets(
       counters.snapshotsSkipped++; // the next snapshot supersedes this one anyway
       return;
     }
+    counters.messagesOut++;
+    counters.bytesOut += typeof frame === "string" ? frame.length : frame.byteLength;
     s.link.out(() => ws.readyState === WebSocket.OPEN && ws.send(frame), true);
   }
 
@@ -188,7 +276,8 @@ export function attachWebSockets(
 
   function close(ws: WebSocket, code: CloseCode, reason: string): void {
     const s = state.get(ws);
-    log(`[${s?.id}] close ${code}: ${reason}`);
+    count(CLOSE_NAME.get(code) ?? String(code));
+    (s?.log ?? log).warn({ event: "ws.close", code, reason });
     if (ws.readyState === WebSocket.OPEN) {
       send(ws, out.error(code, reason), { critical: true });
       ws.close(code, clip(reason));
@@ -199,8 +288,12 @@ export function attachWebSockets(
   const slotOf = (room: Room) => (sessionId: string) => matches.get(room.id)?.slotOf(sessionId);
 
   function stopMatch(room: Room): void {
-    matches.get(room.id)?.stop();
+    const match = matches.get(room.id);
+    if (!match) return;
+    match.stop();
     matches.delete(room.id);
+    onMatchEnd?.(room.id);
+    log.info({ event: "match.stopped", roomId: room.id, ticks: match.tick });
   }
 
   function watchRoom(room: Room): void {
@@ -223,10 +316,10 @@ export function attachWebSockets(
   function ensureMatch(room: Room): Match {
     let match = matches.get(room.id);
     if (!match) {
-      match = new Match(room);
+      match = new Match(room, onTick && { onTickMs: (ms: number) => onTick(room.id, ms) });
       matches.set(room.id, match);
       match.start();
-      log(`match ${room.id} started (seed ${match.seed})`);
+      log.info({ event: "match.started", roomId: room.id, seed: match.seed });
     }
     return match;
   }
@@ -284,6 +377,7 @@ export function attachWebSockets(
     clearTimeout(s.joinTimer);
     s.name = msg.name;
     s.room = room;
+    s.log = s.log.child({ roomId: room.id });
     const sockets = members.get(room.id) ?? new Set<WebSocket>();
     members.set(room.id, sockets.add(ws));
     // The match exists BEFORE room.join() so the roster broadcast already knows the slot.
@@ -298,13 +392,14 @@ export function attachWebSockets(
         tickRate: TICK_RATE,
         codec: s.codec,
         netsim: s.link.settings,
+        boot,
       }),
       {
         critical: true,
       },
     );
     room.join({ id: s.id, name: msg.name }); // -> "join" -> roster broadcast to everyone
-    log(`[${s.id}] ${msg.name} joined ${room.id}`);
+    s.log.info({ event: "player.joined", slot, name: msg.name });
   }
 
   function acceptInput(ws: WebSocket, s: Session, input: Input, bytes: number): void {
@@ -338,7 +433,7 @@ export function attachWebSockets(
       case "netsim":
         if (!netsimAllowed) return close(ws, CLOSE.BAD_SHAPE, "latency injector is disabled");
         s.link.set({ lag: msg.lag, jitter: msg.jitter, drop: msg.drop });
-        log(`[${s.id}] netsim ${JSON.stringify(s.link.settings)}`);
+        s.log.debug({ event: "netsim.set", ...s.link.settings });
         return;
       default:
         return assertNever(msg, "client message");
@@ -356,7 +451,8 @@ export function attachWebSockets(
     acceptInput(ws, s, input, byteLength(data));
   }
 
-  function onConnection(ws: WebSocket, req: IncomingMessage): void {
+  function onConnection(ws: WebSocket, req: IncomingMessage, ip: string): void {
+    const id = randomUUID().slice(0, 8);
     const query = new URL(req.url ?? "/", "http://localhost").searchParams;
     const s: Session = {
       codec: query.get("codec") === "json" ? "json" : "binary",
@@ -365,7 +461,9 @@ export function attachWebSockets(
         perSecond: config.inputRatePerSec,
         burst: config.inputRateBurst,
       }),
-      id: randomUUID().slice(0, 8),
+      id,
+      ip,
+      log: log.child({ playerId: id }),
       name: null,
       room: null,
       missedPongs: 0,
@@ -377,12 +475,15 @@ export function attachWebSockets(
       ),
     };
     state.set(ws, s);
-    log(`[${s.id}] connected from ${req.socket.remoteAddress}`);
+    connectionsPerIp.set(ip, (connectionsPerIp.get(ip) ?? 0) + 1);
+    s.log.info({ event: "ws.connected", ip });
 
     // ALWAYS: an "error" with no listener would throw and take the whole server down.
-    ws.on("error", (error) => log(`[${s.id}] socket error: ${error.message}`));
+    ws.on("error", (error) => s.log.warn({ event: "ws.error", message: error.message }));
     ws.on("pong", () => (s.missedPongs = 0));
     ws.on("message", (data, isBinary) => {
+      counters.messagesIn++;
+      counters.bytesIn += byteLength(data);
       // Real-time inputs (binary, or JSON "input") have their own, larger budget.
       const isInput = isBinary || String(data).startsWith('{"type":"input"');
       const bucket = isInput ? s.inputBucket : s.bucket;
@@ -395,14 +496,17 @@ export function attachWebSockets(
         if (!parsed.ok) return close(ws, parsed.code, parsed.reason);
         try {
           handle(ws, s, parsed.msg, byteLength(data));
-        } catch (error: unknown) {
-          log(`[${s.id}] handler error: ${errorStack(error)}`);
+        } catch (err: unknown) {
+          s.log.error({ event: "ws.handler_error", err });
           close(ws, CLOSE.BAD_SHAPE, "could not process message");
         }
       }, isInput);
     });
     ws.on("close", (code) => {
       clearTimeout(s.joinTimer);
+      const left = (connectionsPerIp.get(ip) ?? 1) - 1;
+      if (left > 0) connectionsPerIp.set(ip, left);
+      else connectionsPerIp.delete(ip); // the map never grows with addresses that left
       const reason =
         code === CLOSE.NORMAL
           ? "left"
@@ -410,7 +514,7 @@ export function attachWebSockets(
             ? "server shutdown"
             : "disconnected";
       leaveRoom(ws, reason);
-      log(`[${s.id}] closed (${code})`);
+      s.log.info({ event: "ws.closed", code });
     });
   }
 
@@ -428,7 +532,8 @@ export function attachWebSockets(
         },
         ping: () => ws.ping(),
         terminate: () => {
-          log(`[${s.id}] terminated: missed 2 pongs`);
+          s.log.warn({ event: "ws.terminated", reason: "missed_pongs" });
+          count("missed_pongs");
           ws.terminate();
         },
       };
@@ -446,14 +551,23 @@ export function attachWebSockets(
     get connections() {
       return wss.clients.size;
     },
-    /** Graceful: close every socket with 1001, wait up to `graceMs`, then terminate the rest. */
-    async shutdown(graceMs = 2000) {
+    perIp: (ip) => connectionsPerIp.get(ip) ?? 0,
+    /**
+     * Graceful: refuse new handshakes, tell every client why ("shutdown" message — the lobby
+     * shows it), close with 1001, wait up to `graceMs`, then terminate whoever is left.
+     */
+    async shutdown(graceMs = config.shutdownGraceMs) {
+      stopping = true;
       stopHeartbeat();
-      for (const match of matches.values()) match.stop();
+      for (const room of rooms.rooms()) stopMatch(room);
       const closed = [...wss.clients].map(
         (ws) =>
           new Promise<void>((resolve) => {
+            if (ws.readyState === WebSocket.CLOSED) return resolve();
             ws.once("close", () => resolve());
+            // Straight to the socket, not through the latency injector: we are leaving NOW.
+            if (ws.readyState === WebSocket.OPEN)
+              ws.send(JSON.stringify(out.shutdown("сервер перезапускається", 2000)));
             ws.close(CLOSE.GOING_AWAY, "server shutting down");
           }),
       );

@@ -76,13 +76,14 @@ export class Match {
     {
       seed = 1 + Math.floor(Math.random() * 2 ** 31),
       tickRate = TICK_RATE,
-    }: { seed?: number; tickRate?: number } = {},
+      onTickMs,
+    }: { seed?: number; tickRate?: number; onTickMs?: (ms: number) => void } = {},
   ) {
     this.room = room;
     this.seed = seed;
     this.world = new World({ seed, ...ARENAS[room.arena] });
     this.#events = collectEvents(this.world);
-    this.loop = new TickLoop(tickRate, () => this.step());
+    this.loop = new TickLoop(tickRate, () => this.step(), onTickMs && { onDuration: onTickMs });
   }
 
   get tick(): number {

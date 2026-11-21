@@ -166,3 +166,25 @@ test("socketUrl: same origin, ws:// or wss://", () => {
   assert.equal(socketUrl({ protocol: "http:", host: "localhost:5173" }), "ws://localhost:5173/ws");
   assert.equal(socketUrl({ protocol: "https:", host: "game.example" }), "wss://game.example/ws");
 });
+
+// ---- Lab 8 ---------------------------------------------------------------------------------
+
+test("Lab 8 Connection: a 'shutdown' message is an event; reconnects give up after maxAttempts", () => {
+  const { conn, socket, timers } = setup({ maxAttempts: 2 });
+  const notices: string[] = [];
+  conn.on("shutdown", (m) => notices.push(m.reason));
+  const closes: Array<string | undefined> = [];
+  conn.on("status", (s) => s.state === "closed" && closes.push(s.reason));
+  conn.open();
+  socket().serverOpen();
+  socket().serverSend({ type: "shutdown", reason: "deploy", retryMs: 2000 });
+  assert.deepEqual(notices, ["deploy"]);
+
+  socket().serverClose(1006); // attempt 1 scheduled
+  timers.at(-1)?.fn();
+  socket().serverClose(1006); // attempt 2 scheduled
+  timers.at(-1)?.fn();
+  socket().serverClose(1006); // 2 failed reconnects: give up
+  assert.equal(timers.length, 2);
+  assert.deepEqual(closes, ["gave up"]);
+});

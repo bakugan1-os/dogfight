@@ -1,11 +1,14 @@
 // The HTTP side (Lab 4, M1): plain node:http, no framework — the point is to see the layer.
-//   GET  /health                 liveness + a few numbers (rss, rooms, connections)
+//   GET  /health                 liveness + version (git SHA) + a few numbers (rss, rooms…)
+//   GET  /ready                  readiness: 503 while shutting down (Lab 8)
+//   GET  /metrics                Prometheus text format (Lab 8, metrics.ts)
 //   GET  /api/rooms              room list (the Lab 3 lobby's format)
 //   POST /api/rooms              create a room; JSON body, size-capped, validated
 //   GET  /api/replays            match logs on disk
 //   GET  /api/replays/:id        the NDJSON file, STREAMED (pipeline: file -> response)
 //   GET  /api/replays/:id/summary  event counts, read line by line through replay.js
 //   GET  /api/slow?ms=300        DEBUG_ROUTES only: blocks the event loop on purpose
+//   POST /api/crash              DEBUG_ROUTES only: an uncaught exception (crash-on-unknown)
 //   GET  /*                      the built client (client/dist), with a path-traversal guard
 
 import { createReadStream, type Stats } from "node:fs";
@@ -16,14 +19,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { RoomError, type RoomManager } from "./rooms.ts";
 import { listReplays, readReplay, replayFile } from "./log/replay.ts";
 import type { ServerConfig } from "./config.ts";
-import { errorCode, errorMessage, errorStack } from "./errors.ts";
+import { errorCode, errorMessage } from "./errors.ts";
+import { silentLogger, type Logger } from "./logger.ts";
+import type { Metrics } from "./metrics.ts";
 import { z } from "zod";
 
 const BotsRequest = z.strictObject({ count: z.number().int().min(1).max(64) });
 
 type Req = IncomingMessage;
 type Res = ServerResponse;
-type Log = (message: string) => void;
 
 export const MIME: Readonly<Record<string, string>> = Object.freeze({
   ".html": "text/html; charset=utf-8",
@@ -149,7 +153,11 @@ export type HandlerDeps = {
   matchStats?: () => object[];
   /** Lab 7: POST /api/rooms/:id/bots */
   addBots?: (roomId: string, count: number) => number;
-  log?: Log;
+  log?: Logger;
+  /** Lab 8: false while shutting down -> /ready answers 503 and the platform stops routing here */
+  ready?: () => boolean;
+  version?: { version: string; sha: string };
+  metrics?: Metrics;
 };
 
 /** A route returns a JSON body, or undefined if it answered by itself (streams). */
@@ -166,10 +174,36 @@ export function createRequestHandler({
   stats = () => ({}),
   matchStats = () => [],
   addBots = () => 0,
-  log = () => {},
+  log = silentLogger,
+  ready = () => true,
+  version = { version: "dev", sha: "dev" },
+  metrics,
 }: HandlerDeps): (req: Req, res: Res) => Promise<void> {
   const routes: Route[] = [
-    ["GET", /^\/health$/, () => ({ status: "ok", ...stats() })],
+    // Liveness: "the process answers". Never depends on rooms or the disk: a failing liveness
+    // check makes the platform RESTART us, so it must only fail when a restart would help.
+    ["GET", /^\/health$/, () => ({ status: "ok", ...version, ...stats() })],
+    // Readiness: "send me players". 503 while draining, so the proxy routes new ones elsewhere.
+    [
+      "GET",
+      /^\/ready$/,
+      (_req, res) => {
+        const ok = ready();
+        sendJson(res, ok ? 200 : 503, { ready: ok });
+        return undefined;
+      },
+    ],
+    [
+      "GET",
+      /^\/metrics$/,
+      async (_req, res) => {
+        if (!metrics) throw new HttpError(404, "metrics are off");
+        const text = await metrics.text();
+        res.writeHead(200, { "content-type": metrics.contentType, "cache-control": "no-store" });
+        res.end(text);
+        return undefined;
+      },
+    ],
     ["GET", /^\/api\/rooms$/, () => ({ rooms: rooms.list() })],
     ["GET", /^\/api\/stats$/, () => ({ ...stats(), matches: matchStats() })],
     [
@@ -193,7 +227,7 @@ export function createRequestHandler({
         const body = await readJsonBody(req); // unknown: RoomManager.create validates it
         try {
           const room = rooms.create(body);
-          log(`room ${room.id} "${room.name}" created via API`);
+          log.info({ event: "room.created", roomId: room.id, name: room.name });
           sendJson(res, 201, { room: room.summary() }, { location: `/api/rooms/${room.id}` });
         } catch (error) {
           if (!(error instanceof RoomError)) throw error;
@@ -256,12 +290,25 @@ export function createRequestHandler({
         return { blockedMs: Math.round(performance.now() - t0) };
       },
     ]);
+    // Lab 8: crash-on-unknown, on demand. The throw happens OUTSIDE the request's try/catch
+    // (next turn of the loop), exactly like a bug in a timer callback would.
+    routes.push([
+      "POST",
+      /^\/api\/crash$/,
+      () => {
+        setImmediate(() => {
+          throw new Error("deliberate crash (DEBUG_ROUTES)");
+        });
+        return { crashing: true };
+      },
+    ]);
   }
 
   return async function handle(req, res) {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const isApi = url.pathname.startsWith("/api/") || url.pathname === "/health";
+      const isApi =
+        url.pathname.startsWith("/api/") || /^\/(health|ready|metrics)$/.test(url.pathname);
       if (!isApi) return await serveStatic(req, res, config);
       const route = routes.find(([m, re]) => re.test(url.pathname) && m === req.method);
       if (!route) {
@@ -276,12 +323,17 @@ export function createRequestHandler({
       if (res.headersSent) {
         // mid-stream failure (client went away, disk error): nothing to answer, just clean up
         if (errorCode(error) !== "ERR_STREAM_PREMATURE_CLOSE")
-          log(`stream error ${url.pathname}: ${errorMessage(error)}`);
+          log.warn({
+            event: "http.stream_error",
+            path: url.pathname,
+            message: errorMessage(error),
+          });
         res.destroy();
         return;
       }
       const status = error instanceof HttpError ? error.status : 500;
-      if (status === 500) log(`500 ${req.method} ${url.pathname}: ${errorStack(error)}`);
+      if (status === 500)
+        log.error({ event: "http.error", method: req.method, path: url.pathname, err: error });
       sendJson(res, status, { error: status === 500 ? "internal error" : errorMessage(error) });
     }
   };

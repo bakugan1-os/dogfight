@@ -13,7 +13,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Room, RoomEvent, RoomManager } from "../rooms.ts";
-import { errorMessage } from "../errors.ts";
+import { silentLogger, type Logger } from "../logger.ts";
 
 type SessionHeader = {
   t: number;
@@ -110,7 +110,7 @@ export type MatchLogger = { readonly open: number; flush(): Promise<void[]> };
 
 export async function createMatchLogger(
   rooms: RoomManager,
-  { dir, log = () => {} }: { dir: string; log?: (message: string) => void },
+  { dir, log = silentLogger }: { dir: string; log?: Logger },
 ): Promise<MatchLogger> {
   await mkdir(dir, { recursive: true });
   const active = new Set<Promise<void>>();
@@ -118,10 +118,12 @@ export async function createMatchLogger(
   const attach = (room: Room) => {
     room.on("open", () => {
       const session = startMatchLog(room, dir);
-      log(`match log ${session.id} started`);
+      log.debug({ event: "matchlog.started", roomId: room.id, file: session.id });
       const tracked = session.done
-        .then(() => log(`match log ${session.id} closed`))
-        .catch((error: unknown) => log(`match log ${session.id} FAILED: ${errorMessage(error)}`))
+        .then(() => log.debug({ event: "matchlog.closed", roomId: room.id, file: session.id }))
+        .catch((err: unknown) =>
+          log.error({ event: "matchlog.failed", roomId: room.id, file: session.id, err }),
+        )
         .finally(() => active.delete(tracked));
       active.add(tracked);
     });

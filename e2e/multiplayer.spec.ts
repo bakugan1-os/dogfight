@@ -18,7 +18,7 @@ async function player(browser: Browser, name: string): Promise<Page> {
 
 const roster = (page: Page) => page.locator("ul.roster li");
 const netState = (page: Page) =>
-  page.evaluate(() => (window as unknown as Probe).__dogfight.netState);
+  page.evaluate(() => (globalThis as unknown as Probe).__dogfight.netState);
 
 test("two players: shared roster, chat, and movement seen by the other within 500 ms", async ({
   browser,

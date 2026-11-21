@@ -739,6 +739,10 @@ declare global {
 window.__dogfight = {
   stats: loop.stats,
   perf: perf.summary,
+  /** Lab 7 (Playwright): my slot and the ships of the newest snapshot, or null outside a match */
+  get netState() {
+    return net ? { slot: net.slot, ships: net.ships() } : null;
+  },
   get world() {
     return world;
   },

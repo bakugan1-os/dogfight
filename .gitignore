@@ -6,3 +6,6 @@ dist/
 !.vscode/extensions.json
 server/logs/
 server/.env
+coverage/
+test-results/
+playwright-report/

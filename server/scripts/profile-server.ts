@@ -50,16 +50,14 @@ const post = async (path: string, body: object): Promise<unknown> =>
       body: JSON.stringify(body),
     })
   ).json();
-const { room } = z
-  .object({ room: z.object({ id: z.string() }) })
-  .parse(
-    await post("/api/rooms", {
-      name: "Server profile",
-      arena: "belt",
-      mode: "duel",
-      maxPlayers: BOTS,
-    }),
-  );
+const { room } = z.object({ room: z.object({ id: z.string() }) }).parse(
+  await post("/api/rooms", {
+    name: "Server profile",
+    arena: "belt",
+    mode: "duel",
+    maxPlayers: BOTS,
+  }),
+);
 let left = BOTS;
 while (left > 0) {
   const n = Math.min(64, left);

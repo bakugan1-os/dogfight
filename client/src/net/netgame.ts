@@ -521,6 +521,15 @@ export class NetGame {
     return this.#world;
   }
 
+  /** Lab 7 (e2e tests): every ship in the newest snapshot, as the server sees it. */
+  ships(): Array<{ slot: PlayerId; x: number; y: number }> {
+    const newest = this.#buffer.at(-1);
+    if (!newest) return [];
+    return newest.snap.entities.flatMap((e) =>
+      e.kind === "ship" ? [{ slot: e.playerId, x: e.x, y: e.y }] : [],
+    );
+  }
+
   /** Lab 7 counters for the profiling script: pooled objects and particles. */
   get poolStats(): { drawables: number; particles: number; droppedParticles: number } {
     return {

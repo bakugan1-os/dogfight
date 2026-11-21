@@ -17,6 +17,9 @@ import { RoomError, type RoomManager } from "./rooms.ts";
 import { listReplays, readReplay, replayFile } from "./log/replay.ts";
 import type { ServerConfig } from "./config.ts";
 import { errorCode, errorMessage, errorStack } from "./errors.ts";
+import { z } from "zod";
+
+const BotsRequest = z.strictObject({ count: z.number().int().min(1).max(64) });
 
 type Req = IncomingMessage;
 type Res = ServerResponse;
@@ -144,6 +147,8 @@ export type HandlerDeps = {
   rooms: RoomManager;
   stats?: () => object;
   matchStats?: () => object[];
+  /** Lab 7: POST /api/rooms/:id/bots */
+  addBots?: (roomId: string, count: number) => number;
   log?: Log;
 };
 
@@ -160,12 +165,27 @@ export function createRequestHandler({
   rooms,
   stats = () => ({}),
   matchStats = () => [],
+  addBots = () => 0,
   log = () => {},
 }: HandlerDeps): (req: Req, res: Res) => Promise<void> {
   const routes: Route[] = [
     ["GET", /^\/health$/, () => ({ status: "ok", ...stats() })],
     ["GET", /^\/api\/rooms$/, () => ({ rooms: rooms.list() })],
     ["GET", /^\/api\/stats$/, () => ({ ...stats(), matches: matchStats() })],
+    [
+      "POST",
+      /^\/api\/rooms\/([\w-]+)\/bots$/,
+      async (req, _res, [id = ""]) => {
+        const body = BotsRequest.safeParse(await readJsonBody(req));
+        if (!body.success) throw new HttpError(400, "body: { count: 1..64 }");
+        try {
+          return { added: addBots(id, body.data.count) };
+        } catch (error: unknown) {
+          if (error instanceof RoomError) throw new HttpError(404, error.message);
+          throw error;
+        }
+      },
+    ],
     [
       "POST",
       /^\/api\/rooms$/,

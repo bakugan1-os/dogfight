@@ -53,6 +53,11 @@ export type ExperimentFlags = Readonly<{
   predict: boolean;
   breakDeterminism: boolean;
   interpDelay: number;
+  /** Lab 7: skip the lobby UI — join this room and start playing (profiling, demos) */
+  join: string | null;
+  name: string;
+  /** Lab 7: performance.mark/measure around simulate, render, decode, reconcile */
+  perf: boolean;
 }>;
 
 export function readExperimentFlags(search: string): ExperimentFlags {
@@ -80,11 +85,15 @@ export function readExperimentFlags(search: string): ExperimentFlags {
     predict: params.get("predict") !== "0",
     breakDeterminism: params.get("breakdet") === "1",
     interpDelay: params.has("interp") ? Number(params.get("interp")) : 100,
+    join: params.get("join"),
+    name: params.get("name") ?? "Пілот",
+    perf: params.get("perf") === "1",
   });
 }
 
 /** Lab 1/2 experiments need the plain game, not menus. */
 export function skipsLobby(flags: ExperimentFlags): boolean {
+  if (flags.join) return false; // ?join= goes to a network game, even with ?autopilot=1
   return (
     flags.lobby === "0" ||
     flags.autopilot ||

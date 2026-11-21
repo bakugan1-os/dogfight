@@ -15,6 +15,7 @@ import {
   type RoomSummary,
 } from "@dogfight/shared/protocol/control.ts";
 import { byId } from "./dom.ts";
+import * as perf from "./perf.ts";
 import type { HudLine } from "./render/draw.ts";
 import type { LoadingState } from "./render/loading.ts";
 import type { Sound } from "./audio.ts";
@@ -22,7 +23,7 @@ import type { LobbyView } from "./lobby/lobby-view.ts";
 import type { RoomView } from "./lobby/room-view.ts";
 import { createArena } from "@dogfight/shared/sim/arena.ts";
 import { setupCanvas, applyCamera } from "./render/canvas.ts";
-import { createStarfield, drawBackground, drawWorld, drawHud } from "./render/draw.ts";
+import { createStarfield, drawBackground, drawWorld, drawHud, measureHud } from "./render/draw.ts";
 import { drawLoading } from "./render/loading.ts";
 import {
   readExperimentFlags,
@@ -46,7 +47,7 @@ import {
 import { DEFAULT_ARENAS, validateArenas, type ArenaTable } from "./arenas.ts";
 import { createAudioContext, unlockOnGesture, createSound, connectAudio } from "./audio.ts";
 import { createHud } from "./hud.ts";
-import { Lobby } from "./lobby/lobby.ts";
+import { Lobby, validateRooms } from "./lobby/lobby.ts";
 import { createLobbyView } from "./lobby/lobby-view.ts";
 import { createRoomView } from "./lobby/room-view.ts";
 import { Connection, socketUrl } from "./net/connection.ts";
@@ -191,7 +192,7 @@ async function loadAssets({ useDefaultArenas = false, firstAttempt = false } = {
       (useDefaultArenas ? "Арени: вбудовані за замовчуванням. " : "") +
       "Натисни «Почати» — цей клік ще й вмикає звук.";
     showActions("start");
-    if (skipsLobby(flags)) afterLoading(); // Lab 1/2 experiments: no click needed
+    if (skipsLobby(flags) || flags.join) afterLoading(); // experiments: no click needed
   } catch (error: unknown) {
     loading.finished = performance.now();
     if (errorName(error) === "AbortError" && controller.signal.aborted) {
@@ -230,7 +231,22 @@ function afterLoading(): void {
   }
   void audioCtx?.resume(); // we are inside a click handler: a user gesture
   if (skipsLobby(flags)) return startGame(null, "P1");
+  if (flags.join) return void autoJoin(flags.join);
   showLobby();
+}
+
+/** ?join=<room id>: straight into that room's game (Lab 7 profiling and the e2e demo). */
+async function autoJoin(roomId: string): Promise<void> {
+  try {
+    const rooms = validateRooms(
+      await fetchJson(new URL(roomsUrlFor(flags.lobby), window.location.href)),
+    );
+    const target = rooms.find((r) => r.id === roomId);
+    if (target) return enterRoom(target, flags.name);
+    showLobby(`Кімнати ${roomId} немає`);
+  } catch (error: unknown) {
+    showLobby(`Не вдалося зайти в ${roomId}: ${describeError(error)}`);
+  }
 }
 
 // ---- lobby ------------------------------------------------------------------------------------
@@ -307,6 +323,7 @@ function enterRoom(selectedRoom: RoomSummary, name: string): void {
       flags: { predict: flags.predict, breakDeterminism: flags.breakDeterminism },
     });
     net.setNames(roster);
+    if (flags.join && screen !== "game") startNetGame();
     console.info(
       `[net] slot ${msg.slot}, codec ${msg.codec}, netsim ${JSON.stringify(msg.netsim)}`,
     );
@@ -462,6 +479,17 @@ const probe: { result: ProbeResult | null } = { result: null };
 
 /** Either keyboard layout steers the ONE local ship of a network game. */
 function netControls(): Controls {
+  if (flags.autopilot) {
+    // ?autopilot=1 in a network game: circle and shoot without a human (profiling runs)
+    const phase = Math.floor(performance.now() / 1500) % 4;
+    return {
+      thrust: phase !== 3,
+      left: phase === 1,
+      right: phase === 2,
+      fire: true,
+      firePressed: false,
+    };
+  }
   const a = readControls(input, BINDINGS[1]);
   const b = readControls(input, BINDINGS[2]);
   return {
@@ -473,7 +501,14 @@ function netControls(): Controls {
   };
 }
 
+/** Lab 7: each phase is measured (perf.ts, ?perf=1) — a no-op call when instrumentation is off. */
 function simulate(dt: number): void {
+  const t0 = perf.begin();
+  simulateStep(dt);
+  perf.end("simulate", t0);
+}
+
+function simulateStep(dt: number): void {
   if (screen === "game" && net) {
     const controls = netControls();
     netFirePressed ||= controls.firePressed; // a click between two 1/30 s steps is not lost
@@ -515,6 +550,12 @@ function effectsText(ship: Ship): string {
 }
 
 function render(alpha: number, stats: LoopStats): void {
+  const t0 = perf.begin();
+  renderFrame(alpha, stats);
+  perf.end("render", t0);
+}
+
+function renderFrame(alpha: number, stats: LoopStats): void {
   frameNo++;
   if (flags.blockMs && frameNo % 60 === 0) busyWait(flags.blockMs);
   const time = performance.now() / 1000;
@@ -598,8 +639,24 @@ function renderNet(net: NetGame, time: number): void {
   hud.drawFloaters(ctx);
   ctx.restore();
 
-  const lines: HudLine[] = [];
-  if (showNetgraph) lines.push(...net.netgraph().map((text) => ({ text, color: "#9fe8ff" })));
+  // Lab 7: the HUD text was rebuilt (strings, objects, measureText) 60 times a second; numbers
+  // that change 4 times a second are now rebuilt 5 times a second and reused in between.
+  const now = performance.now();
+  if (now - netHud.builtAt > 200) buildNetHud(net, now);
+  drawHud(ctx, netHud.lines, netHud.width);
+  if (showNetgraph) drawCorrectionGraph(net.corrections);
+}
+
+const netHud: { lines: HudLine[]; width: number; builtAt: number } = {
+  lines: [],
+  width: 0,
+  builtAt: -Infinity,
+};
+
+function buildNetHud(net: NetGame, now: number): void {
+  const lines = netHud.lines;
+  lines.length = 0;
+  if (showNetgraph) for (const text of net.netgraph()) lines.push({ text, color: "#9fe8ff" });
   if (room) {
     lines.push({
       text: `room     ${room.name} · ${arenas[room.arena]?.name ?? room.arena} · сервер рахує гру, 30 тіків/с`,
@@ -627,33 +684,40 @@ function renderNet(net: NetGame, time: number): void {
     );
   }
   lines.push(...hud.feedLines());
-  drawHud(ctx, lines);
-  if (showNetgraph) drawCorrectionGraph(net.corrections);
+  netHud.width = measureHud(ctx, lines);
+  netHud.builtAt = now;
 }
 
 /** Netgraph sparkline: reconciliation correction per snapshot, last 5 s (top right). */
+let graphLabel = { max: -1, text: "" };
+
 function drawCorrectionGraph(values: readonly number[]): void {
   const w = 240;
   const h = 70;
   const x = view.width - w - 12;
   const y = view.height - h - 30; // bottom right: the HUD text owns the top
-  const max = Math.max(5, ...values);
+  let max = 5; // Lab 7: was Math.max(5, ...values) — spreading 150 numbers into an arguments list
+  for (const v of values) if (v > max) max = v;
   ctx.fillStyle = "rgba(5, 8, 16, 0.75)";
   ctx.fillRect(x, y, w, h + 18);
   ctx.strokeStyle = "#9fe8ff";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  values.forEach((v, i) => {
-    const px = x + (i / 149) * w;
-    const py = y + 16 + h - (v / max) * (h - 4);
+  for (let i = 0; i < values.length; i++) {
+    // integers: a float passed into a canvas call is boxed into a new heap number (Lab 7)
+    const px = (x + (i / 149) * w) | 0;
+    const py = (y + 16 + h - ((values[i] ?? 0) / max) * (h - 4)) | 0;
     if (i) ctx.lineTo(px, py);
     else ctx.moveTo(px, py);
-  });
+  }
   ctx.stroke();
   ctx.fillStyle = "#9fb0d8";
   ctx.font = "11px ui-monospace, Consolas, monospace";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText(`correction, 5 s · max ${max.toFixed(1)}`, x + 6, y + 12);
+  const rounded = Math.round(max * 10);
+  if (graphLabel.max !== rounded)
+    graphLabel = { max: rounded, text: `correction, 5 s · max ${max.toFixed(1)}` };
+  ctx.fillText(graphLabel.text, x + 6, y + 12);
 }
 
 const loop = createLoop({
@@ -674,6 +738,7 @@ declare global {
 }
 window.__dogfight = {
   stats: loop.stats,
+  perf: perf.summary,
   get world() {
     return world;
   },

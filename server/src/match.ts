@@ -31,6 +31,7 @@ import { jsonCodec } from "@dogfight/shared/codec/json.ts";
 import type { CodecName } from "@dogfight/shared/codec/codec.ts";
 import { TickLoop, type TickStats } from "./tickloop.ts";
 import type { Room } from "./rooms.ts";
+import type { PlayerInput } from "./bot.ts";
 
 const MAX_QUEUE = 8; // inputs buffered per player; more = the client runs fast, drop the oldest
 
@@ -50,6 +51,7 @@ type Client = {
 export type MatchStats = TickStats & {
   room: string;
   players: number;
+  bots: number;
   tick: number;
   entities: number;
   jitter: { meanMs: number; p95Ms: number };
@@ -59,6 +61,7 @@ export type MatchStats = TickStats & {
 
 export class Match {
   readonly #clients = new Map<string, Client>(); // sessionId -> client record
+  readonly #bots = new Map<string, { bot: PlayerInput; slot: PlayerId }>();
   readonly #events: ReturnType<typeof collectEvents>;
   readonly room: Pick<Room, "id" | "arena">;
   readonly seed: number;
@@ -122,6 +125,7 @@ export class Match {
   }
 
   removeClient(sessionId: string): void {
+    this.#bots.delete(sessionId);
     const c = this.#clients.get(sessionId);
     if (!c) return;
     this.world.removePlayer(c.playerId);
@@ -130,6 +134,17 @@ export class Match {
 
   slotOf(sessionId: string): PlayerId | undefined {
     return this.#clients.get(sessionId)?.playerId;
+  }
+
+  /** Lab 7: an AI player. It gets a slot like a human; its sink throws the snapshots away. */
+  addBot(sessionId: string, name: string, bot: PlayerInput): PlayerId {
+    const slot = this.addClient(sessionId, name, { codec: "binary", send: () => {} });
+    this.#bots.set(sessionId, { bot, slot });
+    return slot;
+  }
+
+  get bots(): number {
+    return this.#bots.size;
   }
 
   /** A validated input. Old or duplicate sequence numbers are ignored. */
@@ -148,6 +163,11 @@ export class Match {
   }
 
   step(): void {
+    // Bots decide first and go through the SAME queue as socket inputs.
+    for (const [sessionId, { bot, slot }] of this.#bots) {
+      const input = bot.next(this.world, slot);
+      if (input) this.pushInput(sessionId, input);
+    }
     const inputs = new Map<PlayerId, Controls>();
     for (const c of this.#clients.values()) {
       const input = c.queue.shift();
@@ -183,6 +203,7 @@ export class Match {
     return {
       room: this.room.id,
       players: this.#clients.size,
+      bots: this.#bots.size,
       tick: this.world.tick,
       entities: this.world.size,
       ...this.loop.stats,

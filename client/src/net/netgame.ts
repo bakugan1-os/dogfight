@@ -35,11 +35,9 @@ import {
 } from "@dogfight/shared/sim/predict.ts";
 import { BULLET_TTL } from "@dogfight/shared/sim/bullet.ts";
 import { SHIP_PARAMS, type Controls } from "@dogfight/shared/sim/ship.ts";
-import { PICKUP_TYPES, type PickupType } from "@dogfight/shared/sim/pickup.ts";
 import { PLAYER_COLORS } from "@dogfight/shared/sim/arenas.ts";
-import { Explosion } from "@dogfight/shared/sim/explosion.ts";
 import { createRng } from "@dogfight/shared/sim/rng.ts";
-import { Vector2 } from "@dogfight/shared/sim/vector.ts";
+import type { Vector2 } from "@dogfight/shared/sim/vector.ts";
 import { wrappedDelta, wrapCoord, wrapPosition, type Arena } from "@dogfight/shared/sim/arena.ts";
 import { lerpAngle, assertNever } from "@dogfight/shared/sim/math.ts";
 import type { Bus } from "@dogfight/shared/sim/bus.ts";
@@ -53,18 +51,19 @@ import {
   type Seq,
 } from "@dogfight/shared/protocol/ids.ts";
 import type { Connection } from "./connection.ts";
-import type {
-  AsteroidDrawable,
-  BulletDrawable,
-  Drawable,
-  DrawableWorld,
-  PickupDrawable,
-  ShipDrawable,
-} from "../render/draw.ts";
+import { ParticlePool } from "../render/particles.ts";
+import { ViewPool } from "./viewpool.ts";
+import * as perf from "../perf.ts";
+import type { Drawable, DrawableWorld, ShipDrawable } from "../render/draw.ts";
 
 const SMOOTHING_RATE = 30; // 1/s: a correction fades to 5 % in 100 ms (e^-3)
 const TELEPORT = 150; // units: bigger corrections (respawn) snap instead of gliding
-const BUFFER_MS = 1500; // snapshots kept for interpolation
+/**
+ * Snapshots kept beyond the interpolation delay. Lab 7: this was a flat 1500 ms — 45 decoded
+ * snapshots alive at once, old enough to SURVIVE young-generation GCs, get promoted, and then
+ * cost a major GC every few seconds. Now a snapshot lives interpDelay + 250 ms and dies young.
+ */
+const BUFFER_SLACK_MS = 250;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -132,7 +131,14 @@ export class NetGame {
   #localBullets: LocalBullet[] = [];
   readonly #buffer: Buffered[] = []; // ordered by server time
   #clockOffset: number | null = null; // server ms − performance.now(), smoothed
-  #fx: Explosion[] = [];
+  readonly #particles = new ParticlePool(); // Lab 7: pooled explosions (was Explosion[] + objects)
+  readonly #pool = new ViewPool(); // Lab 7: pooled drawables for view()
+  readonly #drawables: Drawable[] = []; // reused every frame
+  readonly #confirmed = new Set<EntityId>(); // reused every frame
+  readonly #world: DrawableWorld;
+  #from: Buffered | null = null; // the two snapshots around render time (#bracket)
+  #to: Buffered | null = null;
+  #t = 0;
   readonly #fxRng = createRng(7);
   readonly #shapes = new Map<EntityId, readonly number[]>();
   #names = new Map<PlayerId, string>(); // slot -> name
@@ -181,6 +187,14 @@ export class NetGame {
     this.bus = bus;
     this.predict = flags.predict !== false; // ?predict=0 -> the M1 "dumb client"
     this.breakDeterminism = Boolean(flags.breakDeterminism); // ?breakdet=1, the M2 experiment
+    // One world object for the renderer, created once: view() refills `#drawables` in place.
+    const drawables = this.#drawables;
+    this.#world = {
+      arena,
+      nameOf: (slot) => this.nameOf(slot),
+      particles: this.#particles,
+      [Symbol.iterator]: () => drawables[Symbol.iterator](),
+    };
     this.#unsubscribe.push(
       conn.on("binary", (buf) => this.#onSnapshot(buf)),
       conn.on("realtime", (text) => this.#onSnapshot(text)),
@@ -233,7 +247,8 @@ export class NetGame {
     if (this.#pending.length > 120) this.#pending.shift(); // server silent for 4 s: don't grow
 
     if (this.#body && this.predict) {
-      this.#prevBody = cloneBody(this.#body);
+      if (this.#prevBody) copyBody(this.#prevBody, this.#body);
+      else this.#prevBody = cloneBody(this.#body);
       if (this.#predict(this.#body, controls)) {
         const b = bulletFrom(this.#body);
         this.#localBullets.push({
@@ -252,9 +267,8 @@ export class NetGame {
       wrapPosition(this.arena, b.pos);
       b.ttl -= TICK_DT;
     }
-    this.#localBullets = this.#localBullets.filter((b) => b.ttl > 0);
-    for (const e of this.#fx) e.update(TICK_DT);
-    this.#fx = this.#fx.filter((e) => e.age < e.duration);
+    removeIf(this.#localBullets, (b) => b.ttl <= 0);
+    this.#particles.update(TICK_DT);
     const decay = Math.exp(-SMOOTHING_RATE * TICK_DT);
     this.#offset.x *= decay;
     this.#offset.y *= decay;
@@ -281,7 +295,9 @@ export class NetGame {
   #onSnapshot(frame: ArrayBuffer | string): void {
     let snap: Snapshot;
     try {
+      const t0 = perf.begin();
       snap = this.#codec.decodeSnapshot(frame);
+      perf.end("decode", t0);
     } catch (error: unknown) {
       console.warn("[net] bad snapshot", error instanceof Error ? error.message : error);
       return;
@@ -301,11 +317,16 @@ export class NetGame {
     const byId = new Map(snap.entities.map((e) => [e.id, e]));
     this.#buffer.push({ time, arrival, snap, byId });
     this.#buffer.sort((a, b) => a.time - b.time);
-    while (this.#buffer.length > 2 && (this.#buffer[0]?.time ?? Infinity) < time - BUFFER_MS)
+    while (
+      this.#buffer.length > 2 &&
+      (this.#buffer[0]?.time ?? Infinity) < time - this.interpDelayMs - BUFFER_SLACK_MS
+    )
       this.#buffer.shift();
 
     for (const p of snap.players) this.players.set(p.id, p);
+    const t1 = perf.begin();
     this.#reconcile(snap);
+    perf.end("reconcile", t1);
     this.#confirmBullets(snap);
     this.#playEvents(snap.events);
   }
@@ -357,19 +378,19 @@ export class NetGame {
     }
     const ahead = this.#pending.length * TICK_DT; // how far our timeline runs ahead of this tick
     const ackSeq = snap.ack & 0xffff;
-    this.#localBullets = this.#localBullets.filter((b) => {
+    removeIf(this.#localBullets, (b) => {
       const server = mine.get(b.seq & 0xffff);
       if (server) {
         b.serverId = server.id;
         b.pos.set(server.x + server.vx * ahead, server.y + server.vy * ahead);
         wrapPosition(this.arena, b.pos);
         b.vel.set(server.vx, server.vy);
-        return true;
+        return false; // keep
       }
       // The server processed the input that fired it, but the bullet is gone (hit something,
       // or the server's ship could not fire): remove our copy.
       const processed = ((ackSeq - (b.seq & 0xffff)) & 0xffff) < 0x8000;
-      return !(processed || b.serverId !== null);
+      return processed || b.serverId !== null;
     });
   }
 
@@ -433,15 +454,7 @@ export class NetGame {
   }
 
   #explode(x: number, y: number, count: number, color: string, speed: number): void {
-    const explosion = new Explosion({
-      pos: new Vector2(x, y),
-      rng: this.#fxRng,
-      count,
-      speed,
-      color,
-      duration: 1,
-    });
-    this.#fx.push(explosion);
+    this.#particles.burst(x, y, count, speed, color, 1, this.#fxRng);
   }
 
   // ---- what to draw this frame -----------------------------------------------------------------
@@ -451,14 +464,20 @@ export class NetGame {
    * @param alpha fraction of the current 1/30 s step (own-ship smoothing)
    */
   view(alpha: number): DrawableWorld {
-    const entities: Drawable[] = [];
+    // Lab 7: nothing in here allocates in steady state — the array, the set, the world object
+    // and every drawable are reused (see viewpool.ts and the README's before/after tables).
+    const entities = this.#drawables;
+    entities.length = 0;
+    this.#pool.reset();
     const renderTime = performance.now() + (this.#clockOffset ?? 0) - this.interpDelayMs;
     const newest = this.#buffer.at(-1);
     this.renderLagMs = newest ? newest.time - renderTime : 0;
-    const [a, b, t] = this.#bracket(renderTime);
-    const confirmed = new Set(
-      this.#localBullets.flatMap((lb) => (lb.serverId !== null ? [lb.serverId] : [])),
-    );
+    this.#bracket(renderTime);
+    const a = this.#from;
+    const b = this.#to;
+    const confirmed = this.#confirmed;
+    confirmed.clear();
+    for (const lb of this.#localBullets) if (lb.serverId !== null) confirmed.add(lb.serverId);
 
     if (a) {
       for (const e of a.snap.entities) {
@@ -466,7 +485,7 @@ export class NetGame {
         if (this.predict && e.kind === "bullet" && e.ownerId === this.slot && confirmed.has(e.id))
           continue;
         const next = b?.byId.get(e.id);
-        entities.push(this.#viewEntity(e, next, t));
+        entities.push(this.#viewEntity(e, next, this.#t));
       }
     }
     if (!this.predict && this.#ownInfo) {
@@ -496,33 +515,40 @@ export class NetGame {
         ),
       );
     }
-    for (const lb of this.#localBullets) {
-      const homing = Boolean(this.#ownInfo && this.#ownInfo.flags & SHIP_FLAG.homing);
-      entities.push(this.#bulletView(lb.pos.x, lb.pos.y, lb.angle, homing));
-    }
-    entities.push(...this.#fx);
+    const homing = Boolean(this.#ownInfo && this.#ownInfo.flags & SHIP_FLAG.homing);
+    for (const lb of this.#localBullets)
+      entities.push(this.#pool.bullet(lb.pos.x, lb.pos.y, lb.angle, homing));
+    return this.#world;
+  }
+
+  /** Lab 7 counters for the profiling script: pooled objects and particles. */
+  get poolStats(): { drawables: number; particles: number; droppedParticles: number } {
     return {
-      arena: this.arena,
-      nameOf: (slot) => this.nameOf(slot),
-      [Symbol.iterator]: () => entities[Symbol.iterator](),
+      drawables: this.#pool.created,
+      particles: this.#particles.count,
+      droppedParticles: this.#particles.dropped,
     };
   }
 
   /** Two buffered snapshots around `time`, and how far between them (0..1). */
-  #bracket(time: number): [Buffered | null, Buffered | null, number] {
+  #bracket(time: number): void {
     const buf = this.#buffer;
-    const first = buf[0];
-    if (!first) return [null, null, 0];
-    if (time <= first.time) return [first, null, 0];
+    const first = buf[0] ?? null;
+    this.#from = first;
+    this.#to = null;
+    this.#t = 0;
+    if (!first || time <= first.time) return;
     for (let i = buf.length - 1; i >= 0; i--) {
       const cur = buf[i];
       if (cur && cur.time <= time) {
         const next = buf[i + 1];
-        if (!next) return [cur, null, 0]; // ran out of future: hold the newest (no guessing)
-        return [cur, next, (time - cur.time) / (next.time - cur.time)];
+        this.#from = cur;
+        if (!next) return; // ran out of future: hold the newest (no guessing)
+        this.#to = next;
+        this.#t = (time - cur.time) / (next.time - cur.time);
+        return;
       }
     }
-    return [first, null, 0];
   }
 
   #viewEntity(e: EntityState, next: EntityState | null | undefined, t: number): Drawable {
@@ -539,58 +565,36 @@ export class NetGame {
       case "ship":
         return this.#shipView(e, x, y, angle, Boolean(e.flags & SHIP_FLAG.thrust));
       case "bullet":
-        return this.#bulletView(x, y, angle, Boolean(e.flags & 1));
+        return this.#pool.bullet(x, y, angle, Boolean(e.flags & 1));
       case "asteroid": {
         const small = Boolean(e.flags & 1);
-        const asteroid: AsteroidDrawable = {
-          ...placed(x, y, angle, small ? 20 : 40),
-          kind: "asteroid",
-          id: e.id,
-          size: small ? "small" : "big",
-          seeker: Boolean(e.flags & 2),
-          shape: this.#shape(e.id),
-        };
+        const asteroid = this.#pool.asteroid(x, y, angle);
+        asteroid.radius = small ? 20 : 40;
+        asteroid.id = e.id;
+        asteroid.size = small ? "small" : "big";
+        asteroid.seeker = Boolean(e.flags & 2);
+        asteroid.shape = this.#shape(e.id);
         return asteroid;
       }
-      case "pickup": {
-        const type: PickupType = PICKUP_NAME[e.type] ?? "shield";
-        const pickup: PickupDrawable = {
-          ...placed(x, y, angle, 14),
-          kind: "pickup",
-          type,
-          spec: PICKUP_TYPES[type],
-        };
-        return pickup;
-      }
+      case "pickup":
+        return this.#pool.pickup(x, y, angle, PICKUP_NAME[e.type] ?? "shield");
       default:
         return assertNever(e, "entity kind");
     }
   }
 
   #shipView(e: ShipState, x: number, y: number, angle: number, thrust: boolean): ShipDrawable {
-    const effects = new Set<PickupType>();
-    if (e.flags & SHIP_FLAG.shield) effects.add("shield");
-    if (e.flags & SHIP_FLAG.rapid) effects.add("rapid");
-    if (e.flags & SHIP_FLAG.homing) effects.add("homing");
-    return {
-      ...placed(x, y, angle, SHIP_PARAMS.radius),
-      kind: "ship",
-      playerId: e.playerId,
-      color: PLAYER_COLORS[(e.playerId - 1) % PLAYER_COLORS.length] ?? "#fff",
-      thrust,
-      invulnerable: e.flags & SHIP_FLAG.invulnerable ? 1 : 0,
-      effects,
-      hp: e.hp,
-      maxHp: SHIP_PARAMS.maxHp,
-    };
-  }
-
-  #bulletView(x: number, y: number, angle: number, homing: boolean): BulletDrawable {
-    return {
-      ...placed(x, y, angle, 3),
-      kind: "bullet",
-      behaviors: homing ? [{ name: "homing" }] : [],
-    };
+    const ship = this.#pool.ship(x, y, angle, SHIP_PARAMS.radius);
+    if (e.flags & SHIP_FLAG.shield) ship.effects.add("shield");
+    if (e.flags & SHIP_FLAG.rapid) ship.effects.add("rapid");
+    if (e.flags & SHIP_FLAG.homing) ship.effects.add("homing");
+    ship.playerId = e.playerId;
+    ship.color = PLAYER_COLORS[(e.playerId - 1) % PLAYER_COLORS.length] ?? "#fff";
+    ship.thrust = thrust;
+    ship.invulnerable = e.flags & SHIP_FLAG.invulnerable ? 1 : 0;
+    ship.hp = e.hp;
+    ship.maxHp = SHIP_PARAMS.maxHp;
+    return ship;
   }
 
   /** Asteroid outlines are cosmetic: derived from the id, so they never travel on the wire. */
@@ -619,8 +623,19 @@ export class NetGame {
   }
 }
 
-/** Position fields of a drawable that is drawn where it is (no previous step to blend from). */
-function placed(x: number, y: number, angle: number, radius: number) {
-  const pos = { x, y };
-  return { pos, prevPos: pos, angle, prevAngle: angle, radius };
+/** In-place filter: removes matching items without allocating a new array (Lab 7). */
+function removeIf<T>(items: T[], remove: (item: T) => boolean): void {
+  let w = 0;
+  for (const item of items) if (!remove(item)) items[w++] = item;
+  items.length = w;
+}
+
+/** Copies a predicted body into an existing one (instead of cloning a new object per step). */
+function copyBody(into: PredictedBody, from: PredictedBody): void {
+  into.pos.copy(from.pos);
+  into.vel.copy(from.vel);
+  into.angle = from.angle;
+  into.thrust = from.thrust;
+  into.cooldown = from.cooldown;
+  into.rapid = from.rapid;
 }

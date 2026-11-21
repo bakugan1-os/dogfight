@@ -28,7 +28,7 @@ export const EnvSchema = z
     LOG_DIR: path("server/logs"),
     STATIC_DIR: path("client/dist"),
     MAX_ROOMS: int(50, 1, 10_000),
-    MAX_PLAYERS_PER_ROOM: int(8, 1, 64),
+    MAX_PLAYERS_PER_ROOM: int(8, 1, 255), // 255: player slots are one byte on the wire
     MAX_CONNECTIONS: int(500, 1, 100_000),
     MAX_PAYLOAD_BYTES: int(4096, 256, 1_048_576),
     JOIN_TIMEOUT_MS: int(5000, 50, 60_000),

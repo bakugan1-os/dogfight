@@ -10,6 +10,7 @@ import type { Particle } from "@dogfight/shared/sim/explosion.ts";
 import type { PlayerId } from "@dogfight/shared/protocol/ids.ts";
 import type { View } from "./canvas.ts";
 import type { Sprite } from "../assets/loader.ts";
+import type { ParticlePool } from "./particles.ts";
 
 // ---- what the renderer needs to know (Lab 6) ---------------------------------------------------
 // STRUCTURAL types: the real simulation entities (Ship, Bullet…) fit them, and so do the plain
@@ -58,10 +59,11 @@ export type ExplosionDrawable = Placed & {
 export type Drawable =
   ShipDrawable | BulletDrawable | AsteroidDrawable | PickupDrawable | ExplosionDrawable;
 
-/** A World fits this; so does NetGame.view(). */
+/** A World fits this; so does NetGame.view(). `particles`: Lab 7's pooled explosions. */
 export type DrawableWorld = Iterable<Drawable> & {
   readonly arena: Arena;
   nameOf(playerId: PlayerId): string;
+  readonly particles?: ParticlePool;
 };
 
 export type Sprites = Readonly<Record<string, Sprite<CanvasImageSource> | undefined>>;
@@ -81,7 +83,34 @@ export function createStarfield(arena: Arena, count = 160, seed = 12345): Star[]
   }));
 }
 
+/**
+ * Lab 7: the background never changes, but it was repainted every frame: ~200 path calls whose
+ * float arguments V8 has to box into heap numbers on the way into the canvas API — the second
+ * biggest allocator in the profile. Now it is painted ONCE per window size into an offscreen
+ * canvas and copied with a single drawImage.
+ */
+let backgroundCache: { canvas: HTMLCanvasElement; key: string } | null = null;
+
 export function drawBackground(ctx: Ctx, view: View, arena: Arena, stars: readonly Star[]): void {
+  const key = `${view.width}x${view.height}@${view.dpr}`;
+  if (typeof document === "undefined") return paintBackground(ctx, view, arena, stars);
+  if (backgroundCache?.key !== key) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(view.width * view.dpr);
+    canvas.height = Math.round(view.height * view.dpr);
+    const off = canvas.getContext("2d");
+    if (!off) return paintBackground(ctx, view, arena, stars);
+    off.scale(view.dpr, view.dpr);
+    paintBackground(off, view, arena, stars);
+    backgroundCache = { canvas, key };
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // copy device pixels 1:1
+  ctx.drawImage(backgroundCache.canvas, 0, 0);
+  ctx.restore();
+}
+
+function paintBackground(ctx: Ctx, view: View, arena: Arena, stars: readonly Star[]): void {
   ctx.fillStyle = "#05070d";
   ctx.fillRect(0, 0, view.width, view.height);
 
@@ -168,28 +197,42 @@ export function drawShip(
  * Draws a body on a torus: when it overlaps an edge, also draws its copy on the opposite side,
  * so the ship slides through the edge instead of popping.
  */
-export function drawWrapped(
-  arena: Arena,
-  x: number,
-  y: number,
-  radius: number,
-  drawAt: (x: number, y: number) => void,
-): void {
-  const xs = [x];
-  const ys = [y];
-  if (x < radius) xs.push(x + arena.width);
-  if (x > arena.width - radius) xs.push(x - arena.width);
-  if (y < radius) ys.push(y + arena.height);
-  if (y > arena.height - radius) ys.push(y - arena.height);
-  for (const dx of xs) for (const dy of ys) drawAt(dx, dy);
+/**
+ * Where to draw something near an edge so it shows on both sides (torus). Writes up to two
+ * coordinates into `out` and returns how many — no arrays, no closures (Lab 7: this used to
+ * allocate two arrays and receive a fresh closure for EVERY entity, EVERY frame).
+ */
+export function wrapOffsets(v: number, size: number, margin: number, out: Float64Array): number {
+  out[0] = v;
+  if (v < margin) {
+    out[1] = v + size;
+    return 2;
+  }
+  if (v > size - margin) {
+    out[1] = v - size;
+    return 2;
+  }
+  return 1;
 }
 
-export function drawHud(ctx: Ctx, lines: readonly HudLine[]): void {
-  const textOf = (l: HudLine) => (typeof l === "string" ? l : l.text);
+const HUD_FONT = "13px ui-monospace, SFMono-Regular, Consolas, monospace";
+const textOf = (l: HudLine) => (typeof l === "string" ? l : l.text);
+
+/** Width of the HUD box for these lines (measureText allocates: call it when the text changes). */
+export function measureHud(ctx: Ctx, lines: readonly HudLine[]): number {
   ctx.save();
-  ctx.font = "13px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.font = HUD_FONT;
+  let width = 0;
+  for (const l of lines) width = Math.max(width, ctx.measureText(textOf(l)).width);
+  ctx.restore();
+  return width + 20;
+}
+
+export function drawHud(ctx: Ctx, lines: readonly HudLine[], knownWidth?: number): void {
+  const width = knownWidth ?? measureHud(ctx, lines);
+  ctx.save();
+  ctx.font = HUD_FONT;
   ctx.textBaseline = "top";
-  const width = Math.max(...lines.map((l) => ctx.measureText(textOf(l)).width)) + 20;
   ctx.fillStyle = "rgba(5, 8, 16, 0.72)";
   ctx.fillRect(8, 8, width, lines.length * 18 + 12);
   lines.forEach((line, i) => {
@@ -201,17 +244,20 @@ export function drawHud(ctx: Ctx, lines: readonly HudLine[]): void {
 }
 
 /** Position and heading of an entity between its previous and current step. */
+export type Interpolated = { x: number; y: number; angle: number };
+
+/** Render position between the previous and the current step. Writes into `out` (reused). */
 export function interpolate(
   entity: Placed,
   alpha: number,
   arena: Arena,
-): { x: number; y: number; angle: number } {
+  out: Interpolated = { x: 0, y: 0, angle: 0 },
+): Interpolated {
   const { prevPos, pos } = entity;
-  return {
-    x: wrapCoord(prevPos.x + wrappedDelta(prevPos.x, pos.x, arena.width) * alpha, arena.width),
-    y: wrapCoord(prevPos.y + wrappedDelta(prevPos.y, pos.y, arena.height) * alpha, arena.height),
-    angle: lerpAngle(entity.prevAngle, entity.angle, alpha),
-  };
+  out.x = wrapCoord(prevPos.x + wrappedDelta(prevPos.x, pos.x, arena.width) * alpha, arena.width);
+  out.y = wrapCoord(prevPos.y + wrappedDelta(prevPos.y, pos.y, arena.height) * alpha, arena.height);
+  out.angle = lerpAngle(entity.prevAngle, entity.angle, alpha);
+  return out;
 }
 
 /**
@@ -393,6 +439,35 @@ function drawExplosion(ctx: Ctx, explosion: ExplosionDrawable, alpha: number, st
  * Draws every entity. Dispatch on `kind` (data) instead of a draw() method on each class:
  * the simulation classes stay free of canvas code and can run on the server in Lab 4–5.
  */
+// Scratch storage reused by every drawWorld call: one frame allocates nothing here.
+const at: Interpolated = { x: 0, y: 0, angle: 0 };
+const xs = new Float64Array(2);
+const ys = new Float64Array(2);
+
+function drawEntity(
+  ctx: Ctx,
+  e: Exclude<Drawable, ExplosionDrawable>,
+  x: number,
+  y: number,
+  angle: number,
+  time: number,
+  sprites: Sprites,
+  world: DrawableWorld,
+): void {
+  switch (e.kind) {
+    case "ship":
+      return drawShipEntity(ctx, e, x, y, angle, time, sprites, world.nameOf(e.playerId));
+    case "bullet":
+      return drawBullet(ctx, e, x, y, angle, sprites);
+    case "asteroid":
+      return drawAsteroid(ctx, e, x, y, angle, sprites);
+    case "pickup":
+      return drawPickup(ctx, e, x, y, angle, time, sprites);
+    default:
+      return assertNever(e, "drawable kind");
+  }
+}
+
 export function drawWorld(
   ctx: Ctx,
   world: DrawableWorld,
@@ -407,21 +482,14 @@ export function drawWorld(
       drawExplosion(ctx, e, alpha, step);
       continue;
     }
-    const { x, y, angle } = interpolate(e, alpha, arena);
+    interpolate(e, alpha, arena, at);
     const margin = e.kind === "ship" ? e.radius * 3 : e.radius * 1.3;
-    drawWrapped(arena, x, y, margin, (dx, dy) => {
-      switch (e.kind) {
-        case "ship":
-          return drawShipEntity(ctx, e, dx, dy, angle, time, sprites, world.nameOf(e.playerId));
-        case "bullet":
-          return drawBullet(ctx, e, dx, dy, angle, sprites);
-        case "asteroid":
-          return drawAsteroid(ctx, e, dx, dy, angle, sprites);
-        case "pickup":
-          return drawPickup(ctx, e, dx, dy, angle, time, sprites);
-        default:
-          return assertNever(e, "drawable kind");
-      }
-    });
+    const nx = wrapOffsets(at.x, arena.width, margin, xs);
+    const ny = wrapOffsets(at.y, arena.height, margin, ys);
+    for (let i = 0; i < nx; i++) {
+      for (let j = 0; j < ny; j++)
+        drawEntity(ctx, e, xs[i] ?? 0, ys[j] ?? 0, at.angle, time, sprites, world);
+    }
   }
+  world.particles?.draw(ctx, (alpha - 1) * step);
 }

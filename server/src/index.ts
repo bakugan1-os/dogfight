@@ -57,6 +57,7 @@ export async function createGameServer(
     rooms,
     stats,
     matchStats: () => sockets?.matchStats() ?? [],
+    addBots: (roomId, count) => sockets?.addBots(roomId, count) ?? 0,
     log: say,
   });
   const server = createServer((req, res) => {

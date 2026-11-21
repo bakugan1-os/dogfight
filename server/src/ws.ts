@@ -38,7 +38,8 @@ import { TokenBucket } from "./ratelimit.ts";
 import { startHeartbeat, type HeartbeatClient } from "./heartbeat.ts";
 import { Match, type MatchStats } from "./match.ts";
 import { createLink, parseNetsim, NO_NETSIM, type Link } from "./netsim.ts";
-import type { Member, Room, RoomManager } from "./rooms.ts";
+import { RoomError, type Member, type Room, type RoomManager } from "./rooms.ts";
+import { Bot } from "./bot.ts";
 import type { ServerConfig } from "./config.ts";
 import { errorMessage, errorStack } from "./errors.ts";
 
@@ -102,6 +103,7 @@ export type Sockets = {
   readonly counters: SocketCounters;
   readonly connections: number;
   matchStats(): MatchStats[];
+  addBots(roomId: string, count: number): number;
   shutdown(graceMs?: number): Promise<void>;
 };
 
@@ -218,6 +220,50 @@ export function attachWebSockets(
   for (const room of rooms.rooms()) watchRoom(room);
   rooms.on("created", watchRoom);
 
+  function ensureMatch(room: Room): Match {
+    let match = matches.get(room.id);
+    if (!match) {
+      match = new Match(room);
+      matches.set(room.id, match);
+      match.start();
+      log(`match ${room.id} started (seed ${match.seed})`);
+    }
+    return match;
+  }
+
+  // ---- bots (Lab 7) ------------------------------------------------------------------------------
+  const botsByRoom = new Map<string, string[]>(); // roomId -> bot session ids
+  let botSeed = 1;
+
+  /** Adds up to `count` bots (as many as fit). Returns how many were added. */
+  function addBots(roomId: string, count: number): number {
+    const room = rooms.get(roomId);
+    if (!room) throw new RoomError("not_found", `no room ${roomId}`);
+    const ids = botsByRoom.get(roomId) ?? [];
+    botsByRoom.set(roomId, ids);
+    let added = 0;
+    while (added < count && !room.isFull) {
+      const id = `bot-${botSeed}`;
+      const name = `Бот ${ids.length + 1}`;
+      const match = ensureMatch(room);
+      match.addBot(id, name, new Bot(botSeed++));
+      room.join({ id, name }); // bots are in the roster: players can see who they fight
+      ids.push(id);
+      added++;
+    }
+    return added;
+  }
+
+  /** Bots never keep a room alive on their own: when the last human leaves, they go too. */
+  function removeBots(room: Room): void {
+    const ids = botsByRoom.get(room.id) ?? [];
+    botsByRoom.delete(room.id);
+    for (const id of ids) {
+      matches.get(room.id)?.removeClient(id);
+      room.leave(id, "bot removed");
+    }
+  }
+
   function leaveRoom(ws: WebSocket, reason: string): void {
     const s = state.get(ws);
     if (!s?.room) return;
@@ -226,6 +272,7 @@ export function attachWebSockets(
     members.get(room.id)?.delete(ws);
     matches.get(room.id)?.removeClient(s.id);
     room.leave(s.id, reason); // may emit "empty" -> RoomManager deletes a temporary room
+    if (!members.get(room.id)?.size && botsByRoom.has(room.id)) removeBots(room);
   }
 
   // ---- one message, by type ---------------------------------------------------------------------
@@ -240,13 +287,7 @@ export function attachWebSockets(
     const sockets = members.get(room.id) ?? new Set<WebSocket>();
     members.set(room.id, sockets.add(ws));
     // The match exists BEFORE room.join() so the roster broadcast already knows the slot.
-    let match = matches.get(room.id);
-    if (!match) {
-      match = new Match(room);
-      matches.set(room.id, match);
-      match.start();
-      log(`match ${room.id} started (seed ${match.seed})`);
-    }
+    const match = ensureMatch(room);
     const slot = match.addClient(s.id, msg.name, {
       codec: s.codec,
       send: (frame) => sendFrame(ws, frame),
@@ -401,6 +442,7 @@ export function attachWebSockets(
     wss,
     counters,
     matchStats: () => [...matches.values()].map((m) => m.stats()),
+    addBots,
     get connections() {
       return wss.clients.size;
     },

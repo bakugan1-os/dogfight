@@ -1,0 +1,163 @@
+{
+  "label": "after",
+  "seconds": 30,
+  "chromium": "157.0.8103.78",
+  "frames": {
+    "n": 1799,
+    "p50": 16.69999999999891,
+    "p95": 16.799999999999272,
+    "p99": 16.80000000000109,
+    "max": 16.80000000000291,
+    "over16_7": 0
+  },
+  "gc": {
+    "minor": {
+      "count": 28,
+      "totalMs": 37.23899999999999,
+      "maxMs": 3.305,
+      "at": []
+    },
+    "major": {
+      "count": 4,
+      "totalMs": 19.599,
+      "maxMs": 10.131,
+      "at": [
+        "20.1s {\"type\":\"finalize incremental marking via task\",\"usedHeapSizeAfter\":3297576,\"usedHeapSizeBefore\":5361588}",
+        "22.9s {\"type\":\"finalize incremental marking via task\",\"usedHeapSizeAfter\":3321072,\"usedHeapSizeBefore\":3629684}",
+        "26.0s {\"type\":\"finalize incremental marking via task\",\"usedHeapSizeAfter\":3320140,\"usedHeapSizeBefore\":4058180}",
+        "29.1s {\"type\":\"finalize incremental marking via task\",\"usedHeapSizeAfter\":3333444,\"usedHeapSizeBefore\":3824380}"
+      ]
+    }
+  },
+  "phases": {
+    "simulate": {
+      "n": 1934,
+      "p50": 0.09999999986030161,
+      "p95": 0.30000000004656613,
+      "p99": 0.6999999999534339
+    },
+    "render": {
+      "n": 1935,
+      "p50": 0.5999999998603016,
+      "p95": 1.1000000000931323,
+      "p99": 2.4000000001396984
+    },
+    "decode": {
+      "n": 964,
+      "p50": 0,
+      "p95": 0.10000000009313226,
+      "p99": 0.30000000004656613
+    },
+    "reconcile": {
+      "n": 964,
+      "p50": 0,
+      "p95": 0.10000000009313226,
+      "p99": 0.19999999995343387
+    }
+  },
+  "selfTime": [
+    {
+      "fn": "(idle)",
+      "ms": 18628.052,
+      "pct": 62.055520414103846
+    },
+    {
+      "fn": "(program)",
+      "ms": 9158.636,
+      "pct": 30.510110411080365
+    },
+    {
+      "fn": "fillText :0",
+      "ms": 270.059,
+      "pct": 0.8996459633842804
+    },
+    {
+      "fn": "drawImage :0",
+      "ms": 177.178,
+      "pct": 0.5902320326317584
+    },
+    {
+      "fn": "save :0",
+      "ms": 144.537,
+      "pct": 0.48149526070108284
+    },
+    {
+      "fn": "send :0",
+      "ms": 130.501,
+      "pct": 0.4347372161920616
+    },
+    {
+      "fn": "frame main-COBziHue.js:84",
+      "ms": 117.519,
+      "pct": 0.3914903557035953
+    },
+    {
+      "fn": "requestAnimationFrame :0",
+      "ms": 108.614,
+      "pct": 0.3618251814122848
+    },
+    {
+      "fn": "drawShipEntity main-COBziHue.js:7409",
+      "ms": 81.503,
+      "pct": 0.2715104660600424
+    },
+    {
+      "fn": "(garbage",
+      "ms": 74.478,
+      "pct": 0.2481081247465718
+    },
+    {
+      "fn": "measure :0",
+      "ms": 54.781,
+      "pct": 0.18249162412715098
+    },
+    {
+      "fn": "fillRect :0",
+      "ms": 46.054,
+      "pct": 0.153419420192253
+    }
+  ],
+  "allocators": [
+    {
+      "fn": "drawCorrectionGraph main-COBziHue.js:10442",
+      "MB": 7.138801574707031,
+      "pct": 20.407788485036914
+    },
+    {
+      "fn": "decodeSnapshot$1 main-COBziHue.js:8894",
+      "MB": 5.780708312988281,
+      "pct": 16.525388934066406
+    },
+    {
+      "fn": "view main-COBziHue.js:9720",
+      "MB": 2.81805419921875,
+      "pct": 8.056009602618277
+    },
+    {
+      "fn": "drawWorld main-COBziHue.js:7521",
+      "MB": 2.3560333251953125,
+      "pct": 6.735224289555538
+    },
+    {
+      "fn": "#viewEntity main-COBziHue.js:9778",
+      "MB": 1.2796554565429688,
+      "pct": 3.6581683378591427
+    },
+    {
+      "fn": "set :0",
+      "MB": 1.0614051818847656,
+      "pct": 3.0342533297986183
+    },
+    {
+      "fn": "drawAsteroid main-COBziHue.js:7446",
+      "MB": 1.0224380493164062,
+      "pct": 2.9228574615984146
+    },
+    {
+      "fn": "wrappedDelta main-COBziHue.js:236",
+      "MB": 0.9349708557128906,
+      "pct": 2.6728138138292055
+    }
+  ],
+  "allocatedMBperS": 1.1660256703694662
+}

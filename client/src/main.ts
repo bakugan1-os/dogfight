@@ -17,6 +17,7 @@ import {
 import { byId } from "./dom.ts";
 import * as perf from "./perf.ts";
 import { CLIENT_VERSION, fetchServerVersion } from "./version.ts";
+import { registerServiceWorker } from "./pwa.ts";
 import type { HudLine } from "./render/draw.ts";
 import type { LoadingState } from "./render/loading.ts";
 import type { Sound } from "./audio.ts";
@@ -251,6 +252,8 @@ async function autoJoin(roomId: string): Promise<void> {
 }
 
 // ---- lobby ------------------------------------------------------------------------------------
+registerServiceWorker(); // Lab 8: installable (PWA)
+
 const lobby = new Lobby({
   url: new URL(roomsUrlFor(flags.lobby), window.location.href).href,
   fetch: fetchImpl,

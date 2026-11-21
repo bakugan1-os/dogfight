@@ -1,0 +1,22 @@
+{
+  "name": "Dogfight — космічні дуелі",
+  "short_name": "Dogfight",
+  "description": "Багатокористувацькі космічні дуелі в браузері: до 8 пілотів, сервер рахує гру 30 разів на секунду.",
+  "lang": "uk",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

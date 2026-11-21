@@ -2,6 +2,7 @@
   // The root: only the repo-level tooling (scripts/dev.ts, eslint config). Each package has its
   // own tsconfig; `npm run typecheck` checks all four.
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "types": ["node"] },
+  // "dom": the e2e specs run code IN the page (page.evaluate) — navigator, fetch, document.
+  "compilerOptions": { "types": ["node"], "lib": ["es2023", "dom"] },
   "include": ["scripts/**/*.ts", "vitest.config.ts", "playwright.config.ts", "e2e/**/*.ts"]
 }

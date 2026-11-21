@@ -34,6 +34,7 @@ export const MIME: Readonly<Record<string, string>> = Object.freeze({
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".ndjson": "application/x-ndjson; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
@@ -128,7 +129,12 @@ async function serveStatic(req: Req, res: Res, { staticDir }: ServerConfig): Pro
   res.writeHead(200, {
     "content-type": type,
     "content-length": info.size,
-    "cache-control": type.startsWith("text/html") ? "no-cache" : "public, max-age=3600",
+    // HTML, the service worker and the manifest are revalidated on every load (a deploy must be
+    // seen at once); everything else may be cached for an hour.
+    "cache-control":
+      type.startsWith("text/html") || /\/(sw\.js|manifest\.webmanifest)$/.test(file)
+        ? "no-cache"
+        : "public, max-age=3600",
     "x-content-type-options": "nosniff",
   });
   if (req.method === "HEAD") {

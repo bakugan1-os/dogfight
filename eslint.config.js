@@ -20,6 +20,11 @@ export default tseslint.config(
   js.configs.recommended,
   tseslint.configs.recommended,
   {
+    // Lab 8: the service worker is plain JS that runs in a worker, not on a page.
+    files: ["client/public/sw.js"],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     // Lab 7: TYPE-CHECKED rules. ESLint asks the TypeScript compiler (projectService finds each
     // file's tsconfig) whether an expression is a Promise, an `any`, … — things syntax alone
     // cannot know.

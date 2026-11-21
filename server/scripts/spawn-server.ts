@@ -1,5 +1,5 @@
-// Starts `node src/index.ts` in a child process for the measuring scripts and waits for its
-// banner. A child process, so that whatever the script measures blocks the SERVER, not itself.
+// Starts `node src/index.ts` in a child process for the measuring scripts and waits until it is
+// ready (Lab 8: GET /ready — the logs are JSON now, no banner to grep). A child process, so that whatever the script measures blocks the SERVER, not itself.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -15,10 +15,22 @@ export async function startServerProcess(
     env: { ...process.env, PORT: String(port), QUIET: "true", ...env },
     stdio: ["ignore", "pipe", "inherit"],
   });
-  let banner = "";
-  server.stdout?.on("data", (d: Buffer) => (banner += String(d)));
-  while (!banner.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 30));
+  await waitReady(`http://127.0.0.1:${port}`);
   return server;
+}
+
+/** Polls GET /ready until the server answers 200 (Lab 8 readiness). */
+export async function waitReady(base: string, timeoutMs = 15_000): Promise<void> {
+  const t0 = performance.now();
+  while (
+    !(await fetch(`${base}/ready`).then(
+      (r) => r.ok,
+      () => false,
+    ))
+  ) {
+    if (performance.now() - t0 > timeoutMs) throw new Error(`${base} not ready in ${timeoutMs} ms`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 export async function stopServerProcess(server: ChildProcess): Promise<void> {

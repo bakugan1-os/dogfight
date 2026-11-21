@@ -1,0 +1,20 @@
+# Everything the image does not need — smaller build context, no secrets, no stale builds.
+**/node_modules
+.git
+.github
+**/dist
+**/*.log
+server/logs
+server/.env
+**/.env
+coverage
+test-results
+playwright-report
+.vitest
+docs
+e2e
+**/test
+**/scripts
+*.md
+Dockerfile
+docker-compose.yml

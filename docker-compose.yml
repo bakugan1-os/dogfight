@@ -1,0 +1,28 @@
+# Lab 8: a production-like run on a laptop (the same image the pipeline deploys).
+#   GIT_SHA=$(git rev-parse --short HEAD) docker compose up --build
+#   -> http://localhost:8787      /health  /ready  /metrics
+#   docker compose stop           -> SIGTERM -> graceful shutdown (watch the logs)
+services:
+  dogfight:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: dogfight:local
+    ports:
+      - "8787:8787"
+    environment:
+      LOG_LEVEL: info
+      # the page is served by this same server, so the default (same host only) is enough
+      ALLOWED_ORIGINS: ""
+      MAX_CONNECTIONS_PER_IP: "20"
+    # match logs survive a container restart
+    volumes:
+      - match-logs:/app/server/logs
+    restart: unless-stopped
+    stop_grace_period: 10s
+    read_only: true # the only writable place is the logs volume
+    tmpfs:
+      - /tmp
+volumes:
+  match-logs:

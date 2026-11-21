@@ -1,0 +1,22 @@
+# Lab 8: Render blueprint (render.com -> New -> Blueprint -> this repo).
+# Render builds the Dockerfile itself; deploys are triggered by the release workflow's deploy
+# hook (a `v*` tag) or by "Manual Deploy" in the dashboard — not by every push to main.
+services:
+  - type: web
+    name: dogfight
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free # spins down after 15 min idle: the first visitor waits ~30-60 s (README says so)
+    region: frankfurt
+    autoDeploy: false
+    healthCheckPath: /ready # readiness: no traffic until we can serve, none while draining
+    envVars:
+      - key: LOG_LEVEL
+        value: info
+      - key: TRUST_PROXY # Render's proxy is in front: client IPs are in X-Forwarded-For
+        value: "true"
+      - key: MAX_CONNECTIONS_PER_IP
+        value: "20"
+      - key: ALLOWED_ORIGINS # the page is served by this same service; add an itch.io page here
+        value: ""

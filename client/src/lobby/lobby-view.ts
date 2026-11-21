@@ -34,6 +34,9 @@ export function createLobbyView(
   }
   const list = el("ul", { className: "rooms" });
   const status = el("p", { className: "status", role: "status" });
+  // Lab 8: messages from OUTSIDE the lobby ("the server restarted") get their own line — the
+  // status line is rewritten by every poll and would erase them within a second.
+  const noticeLine = el("p", { className: "notice", role: "alert", hidden: true });
   const joinButton = el("button", {
     className: "primary",
     textContent: "Приєднатися",
@@ -66,6 +69,7 @@ export function createLobbyView(
 
   root.append(
     el("h1", { textContent: "Лобі" }),
+    noticeLine,
     el("label", { className: "field" }, "Ім'я пілота", nameInput),
     el("h2", { textContent: "Кімнати" }),
     list,
@@ -178,6 +182,7 @@ export function createLobbyView(
     } catch {
       // ignore
     }
+    noticeLine.hidden = true;
     lobby.join(selected, nameInput.value);
   }
   joinButton.addEventListener("click", join);
@@ -186,8 +191,8 @@ export function createLobbyView(
   return {
     /** A message from outside the lobby, e.g. the server refused to let us into a room. */
     notice(text) {
-      status.dataset.state = "error";
-      status.textContent = text;
+      noticeLine.textContent = text;
+      noticeLine.hidden = false;
     },
     show() {
       root.hidden = false;

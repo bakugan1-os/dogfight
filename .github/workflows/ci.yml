@@ -2,11 +2,14 @@
 # typecheck -> lint (type-checked rules) -> unit tests with coverage -> build -> e2e in Chromium.
 # A step only runs if everything before it passed. Vite and Node only STRIP types, so without the
 # first step a type error could reach main unnoticed.
+# Lab 8: the production Docker image is built too — the deploy must never be its first build.
 name: CI
 
 on:
   push:
+    branches: ["**"] # tags run it through release.yml (workflow_call) instead
   pull_request:
+  workflow_call: # Lab 8: release.yml runs this exact chain first — a red CI never ships
 
 jobs:
   check:
@@ -33,6 +36,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: e2e (Playwright)
         run: npm run e2e
+      - name: production image builds
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t dogfight:ci .
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

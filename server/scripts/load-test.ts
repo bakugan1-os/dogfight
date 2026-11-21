@@ -18,6 +18,7 @@ import { z } from "zod";
 import { binaryCodec } from "@dogfight/shared/codec/binary.ts";
 import { PROTOCOL_VERSION } from "@dogfight/shared/protocol/control.ts";
 import { seq, tick } from "@dogfight/shared/protocol/ids.ts";
+import { waitReady } from "./spawn-server.ts";
 
 const LEVELS = (process.argv[2] ?? "8,32,64,128,192,255").split(",").map(Number);
 const SECONDS = Number(process.argv[3] ?? 20);
@@ -52,9 +53,7 @@ async function level(n: number) {
     },
     stdio: ["ignore", "pipe", "inherit"],
   });
-  let banner = "";
-  server.stdout.on("data", (d: Buffer) => (banner += String(d)));
-  while (!banner.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 50));
+  await waitReady(base);
   const created = z.object({ room: z.object({ id: z.string() }) }).parse(
     await (
       await fetch(`${base}/api/rooms`, {

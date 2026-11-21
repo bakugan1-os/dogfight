@@ -18,6 +18,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type CDPSession, type Page } from "playwright";
 import { z } from "zod";
+import { waitReady } from "../../server/scripts/spawn-server.ts";
 
 const label = process.argv[2] ?? "run";
 const SECONDS = Number(process.argv[3] ?? 30);
@@ -31,9 +32,7 @@ const server = spawn(process.execPath, ["server/src/index.ts"], {
   env: { ...process.env, PORT: String(PORT), QUIET: "true", MAX_PLAYERS_PER_ROOM: "16" },
   stdio: ["ignore", "pipe", "inherit"],
 });
-let banner = "";
-server.stdout.on("data", (d: Buffer) => (banner += String(d)));
-while (!banner.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 50));
+await waitReady(base);
 
 const post = async (path: string, body: object): Promise<unknown> =>
   (

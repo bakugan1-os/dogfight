@@ -107,6 +107,8 @@ type Session = {
   room: Room | null;
   missedPongs: number;
   dropped: number;
+  /** we already closed it (and counted why): later errors from frames in flight are not news */
+  closing: boolean;
 };
 
 export type SocketCounters = {
@@ -276,6 +278,8 @@ export function attachWebSockets(
 
   function close(ws: WebSocket, code: CloseCode, reason: string): void {
     const s = state.get(ws);
+    if (s?.closing) return;
+    if (s) s.closing = true;
     count(CLOSE_NAME.get(code) ?? String(code));
     (s?.log ?? log).warn({ event: "ws.close", code, reason });
     if (ws.readyState === WebSocket.OPEN) {
@@ -468,6 +472,7 @@ export function attachWebSockets(
       room: null,
       missedPongs: 0,
       dropped: 0,
+      closing: false,
       bucket: new TokenBucket({ perSecond: config.rateLimitPerSec, burst: config.rateLimitBurst }),
       joinTimer: setTimeout(
         () => close(ws, CLOSE.JOIN_TIMEOUT, "no join within timeout"),
@@ -479,7 +484,14 @@ export function attachWebSockets(
     s.log.info({ event: "ws.connected", ip });
 
     // ALWAYS: an "error" with no listener would throw and take the whole server down.
-    ws.on("error", (error) => s.log.warn({ event: "ws.error", message: error.message }));
+    // `ws` itself closes a socket on protocol errors (1009: frame over MAX_PAYLOAD_BYTES, bad
+    // UTF-8…) and reports them here: counted like our own closes.
+    ws.on("error", (error: Error & { code?: string }) => {
+      if (s.closing) return; // frames already in flight can repeat it: one socket, one count
+      s.closing = true;
+      count(error.code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" ? "too_big" : "protocol_error");
+      s.log.warn({ event: "ws.error", code: error.code, message: error.message });
+    });
     ws.on("pong", () => (s.missedPongs = 0));
     ws.on("message", (data, isBinary) => {
       counters.messagesIn++;

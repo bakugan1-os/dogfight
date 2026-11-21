@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { waitReady } from "./spawn-server.ts";
 
 const label = process.argv[2] ?? "run";
 const BOTS = Number(process.argv[3] ?? 32);
@@ -38,9 +39,7 @@ const server = spawn(
     stdio: ["ignore", "pipe", "inherit"],
   },
 );
-let banner = "";
-server.stdout.on("data", (d: Buffer) => (banner += String(d)));
-while (!banner.includes("dogfight server on")) await new Promise((r) => setTimeout(r, 50));
+await waitReady(base);
 
 const post = async (path: string, body: object): Promise<unknown> =>
   (

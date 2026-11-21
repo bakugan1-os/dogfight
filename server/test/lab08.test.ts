@@ -114,3 +114,14 @@ test("/metrics: Prometheus text with players, traffic, rejections and per-room t
   ada.ws.close();
   await once(ada.ws, "close");
 });
+
+test("handshake rate per IP: a burst passes, the excess gets 429 before any WebSocket work", async ({
+  onTestFinished,
+}) => {
+  const { game, ws } = await startServer({ CONNECT_BURST_PER_IP: "3", CONNECT_RATE_PER_IP: "1" });
+  onTestFinished(() => game.stop());
+  const statuses = [];
+  for (let i = 0; i < 5; i++) statuses.push(await handshake(ws));
+  assert.deepEqual(statuses, [101, 101, 101, 429, 429]);
+  assert.equal(game.sockets.counters.rejections.connect_rate, 2);
+});

@@ -47,6 +47,8 @@ async function level(n: number) {
       QUIET: "true",
       MAX_PLAYERS_PER_ROOM: "255",
       MAX_CONNECTIONS: "1000",
+      MAX_CONNECTIONS_PER_IP: "1000", // every load-test client comes from 127.0.0.1
+      CONNECT_BURST_PER_IP: "1000",
       INPUT_RATE_BURST: "200",
       SLOW_CLIENT_BYTES: String(4 * 1024 * 1024),
       DROP_CLIENT_BYTES: String(64 * 1024 * 1024),

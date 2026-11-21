@@ -63,6 +63,9 @@ export const EnvSchema = z
       )
       .pipe(z.array(z.union([z.literal("*"), z.url({ protocol: /^https?$/ })]))),
     MAX_CONNECTIONS_PER_IP: int(20, 1, 100_000),
+    /** New WebSocket handshakes per second from one address (a reconnect storm, a flood script). */
+    CONNECT_RATE_PER_IP: int(5, 1, 10_000),
+    CONNECT_BURST_PER_IP: int(20, 1, 10_000),
     /** Behind a proxy (Fly, Render) the socket's address is the PROXY: trust X-Forwarded-For. */
     TRUST_PROXY: bool(false),
     /** SIGTERM: how long WebSocket clients get to close before they are cut. */

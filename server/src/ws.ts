@@ -177,6 +177,15 @@ export function attachWebSockets(
     counters.rejections[reason] = (counters.rejections[reason] ?? 0) + 1;
   };
   const connectionsPerIp = new Map<string, number>();
+  // Lab 8 (found by the chaos test): a flood of NEW connections costs every room event-loop
+  // time — each handshake is parsed, hashed and answered. A token bucket per address refuses
+  // the excess with a 429 before any of that work. Full (idle) buckets are swept every 30 s.
+  const handshakesPerIp = new Map<string, TokenBucket>();
+  const sweep = setInterval(() => {
+    for (const [ip, bucket] of handshakesPerIp)
+      if (bucket.take(0) && bucket.tokens >= bucket.burst) handshakesPerIp.delete(ip);
+  }, 30_000);
+  sweep.unref();
   let stopping = false;
   const matches = new Map<string, Match>(); // roomId -> Match
   const netsimAllowed = config.netsim || config.debugRoutes;
@@ -214,11 +223,22 @@ export function attachWebSockets(
     const ip = clientIp(req);
     const refuse = (status: number, text: string, reason: string) => {
       count(reason);
-      log.warn({ event: "ws.rejected", reason, ip, origin: req.headers.origin });
+      // A refused flood would also flood the log: those go to "debug", the metric counts them all.
+      const level = reason === "connect_rate" ? "debug" : "warn";
+      log[level]({ event: "ws.rejected", reason, ip, origin: req.headers.origin });
       socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
     if (pathname !== "/ws") return refuse(404, "Not Found", "not_found");
     if (stopping) return refuse(503, "Shutting Down", "shutdown");
+    let bucket = handshakesPerIp.get(ip);
+    if (!bucket) {
+      bucket = new TokenBucket({
+        perSecond: config.connectRatePerIp,
+        burst: config.connectBurstPerIp,
+      });
+      handshakesPerIp.set(ip, bucket);
+    }
+    if (!bucket.take()) return refuse(429, "Too Many Requests", "connect_rate");
     if (!originAllowed(req)) return refuse(403, "Forbidden", "origin");
     if (wss.clients.size >= config.maxConnections) return refuse(503, "Server Full", "full");
     if ((connectionsPerIp.get(ip) ?? 0) >= config.maxConnectionsPerIp)
@@ -571,6 +591,7 @@ export function attachWebSockets(
     async shutdown(graceMs = config.shutdownGraceMs) {
       stopping = true;
       stopHeartbeat();
+      clearInterval(sweep);
       for (const room of rooms.rooms()) stopMatch(room);
       const closed = [...wss.clients].map(
         (ws) =>

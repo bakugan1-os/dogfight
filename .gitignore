@@ -9,3 +9,4 @@ server/.env
 coverage/
 test-results/
 playwright-report/
+.vitest/
